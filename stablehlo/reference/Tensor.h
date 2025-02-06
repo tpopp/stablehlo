@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef STABLEHLO_REFERENCE_TENSOR_H
 #define STABLEHLO_REFERENCE_TENSOR_H
 
+#include <numeric>
 #include <vector>
 
 #include "llvm/ADT/ArrayRef.h"
@@ -25,9 +26,9 @@ limitations under the License.
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "stablehlo/reference/Axes.h"
 #include "stablehlo/reference/Element.h"
 #include "stablehlo/reference/Index.h"
-#include "stablehlo/reference/Sizes.h"
 
 namespace mlir {
 namespace stablehlo {
@@ -35,12 +36,12 @@ namespace stablehlo {
 namespace detail {
 
 /// Underlying storage class for Tensor objects.
-class Buffer : public llvm::RefCountedBase<Buffer> {
+class Buffer : public llvm::ThreadSafeRefCountedBase<Buffer> {
  public:
   /// \name Constructors
   /// @{
-  explicit Buffer(TensorType type);
-  Buffer(TensorType type, AsmResourceBlob blob);
+  explicit Buffer(ShapedType type);
+  Buffer(ShapedType type, AsmResourceBlob blob);
   Buffer(Buffer &&other) = default;
   /// @}
 
@@ -48,7 +49,7 @@ class Buffer : public llvm::RefCountedBase<Buffer> {
   Buffer &operator=(Buffer &&other) = delete;
 
   /// Returns type of the Buffer object.
-  TensorType getType() { return type_; }
+  ShapedType getType() { return type_; }
 
   /// Provides access to the underlying non-mutable storage.
   ArrayRef<char> getData() const { return blob_.getData(); }
@@ -57,7 +58,7 @@ class Buffer : public llvm::RefCountedBase<Buffer> {
   MutableArrayRef<char> getMutableData() { return blob_.getMutableData(); }
 
  private:
-  TensorType type_;
+  ShapedType type_;
   AsmResourceBlob blob_;
 };
 
@@ -70,19 +71,32 @@ class Tensor {
   /// \name Constructors
   /// @{
   Tensor();
-  explicit Tensor(TensorType type);
-  explicit Tensor(TensorType type, AsmResourceBlob blob);
+  explicit Tensor(ShapedType type);
+  explicit Tensor(ShapedType type, AsmResourceBlob blob);
   Tensor(const Tensor &other) = default;
   /// @}
 
   /// Assignment operator.
   Tensor &operator=(const Tensor &other) = default;
 
+  /// Boolean conversion operator.
+  explicit operator bool() const { return (bool)impl_; }
+
+  /// Logical not operator.
+  bool operator!() const { return !impl_; }
+
   /// Returns type of the Tensor object.
-  TensorType getType() const { return impl_->getType(); };
+  ShapedType getType() const { return impl_->getType(); };
 
   /// Returns rank of the Tensor object.
   int64_t getRank() const { return impl_->getType().getRank(); }
+
+  /// Returns axes of the Tensor object: [0, 1, ..., getRank() - 1].
+  Axes getAxes() const {
+    Axes result(getRank());
+    std::iota(result.begin(), result.end(), 0);
+    return result;
+  }
 
   /// Returns shape of the Tensor object.
   Sizes getShape() const { return Sizes(impl_->getType().getShape()); }
@@ -95,6 +109,9 @@ class Tensor {
 
   /// Provides read access to the tensor element indexed at 'index'.
   Element get(const Index &index) const;
+
+  /// Provides read access to underlying tensor data buffer.
+  const char *getData() const { return impl_->getData().data(); }
 
   /// Provides write access to the tensor element indexed at 'index'.
   ///
@@ -121,8 +138,14 @@ inline raw_ostream &operator<<(raw_ostream &os, Tensor tensor) {
   return os;
 }
 
-/// Creates a Tensor using 'DenseElementsAttr' object 'attr'.
+/// Creates a Tensor from a DenseElementsAttr.
 Tensor makeTensor(DenseElementsAttr attr);
+
+/// Creates a DenseElementsAttr from a Tensor.
+DenseElementsAttr makeDenseElementsAttr(Tensor tensor);
+
+/// Creates a Sizes from a Tensor.
+Sizes makeSizes(Tensor tensor);
 
 }  // namespace stablehlo
 }  // namespace mlir

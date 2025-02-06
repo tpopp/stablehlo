@@ -13,6 +13,15 @@ limitations under the License.
 
 #include "stablehlo/integrations/c/StablehloAttributes.h"
 
+#include <cstdint>
+#include <optional>
+
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "mlir-c/IR.h"
+#include "mlir-c/Support.h"
 #include "mlir/CAPI/IR.h"
 #include "mlir/CAPI/Support.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -24,67 +33,91 @@ limitations under the License.
 MlirAttribute stablehloScatterDimensionNumbersGet(
     MlirContext ctx, intptr_t nUpdateWindowDims,
     const int64_t *updateWindowDims, intptr_t nInsertedWindowDims,
-    const int64_t *insertedWindowDims, intptr_t nScatteredDimsToOperandDims,
+    const int64_t *insertedWindowDims, intptr_t nInputBatchingDims,
+    const int64_t *inputBatchingDims, intptr_t nScatterIndicesBatchingDims,
+    const int64_t *scatterIndicesBatchingDims,
+    intptr_t nScatteredDimsToOperandDims,
     const int64_t *scatteredDimsToOperandDims, int64_t indexVectorDim) {
   return wrap(mlir::stablehlo::ScatterDimensionNumbersAttr::get(
       unwrap(ctx), llvm::ArrayRef(updateWindowDims, nUpdateWindowDims),
       llvm::ArrayRef(insertedWindowDims, nInsertedWindowDims),
+      llvm::ArrayRef(inputBatchingDims, nInputBatchingDims),
+      llvm::ArrayRef(scatterIndicesBatchingDims, nScatterIndicesBatchingDims),
       llvm::ArrayRef(scatteredDimsToOperandDims, nScatteredDimsToOperandDims),
       indexVectorDim));
 }
 
 bool stablehloAttributeIsAScatterDimensionNumbers(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::ScatterDimensionNumbersAttr>();
+  return llvm::isa<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr));
 }
 
 intptr_t stablehloScatterDimensionNumbersGetUpdateWindowDimsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ScatterDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
       .getUpdateWindowDims()
       .size();
 }
 
 int64_t stablehloScatterDimensionNumbersGetUpdateWindowDimsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ScatterDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
       .getUpdateWindowDims()[pos];
 }
 
 intptr_t stablehloScatterDimensionNumbersGetInsertedWindowDimsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ScatterDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
       .getInsertedWindowDims()
       .size();
 }
 
 int64_t stablehloScatterDimensionNumbersGetInsertedWindowDimsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ScatterDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
       .getInsertedWindowDims()[pos];
+}
+
+intptr_t stablehloScatterDimensionNumbersGetInputBatchingDimsSize(
+    MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
+      .getInputBatchingDims()
+      .size();
+}
+
+int64_t stablehloScatterDimensionNumbersGetInputBatchingDimsElem(
+    MlirAttribute attr, intptr_t pos) {
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
+      .getInputBatchingDims()[pos];
+}
+
+intptr_t stablehloScatterDimensionNumbersGetScatterIndicesBatchingDimsSize(
+    MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
+      .getScatterIndicesBatchingDims()
+      .size();
+}
+
+int64_t stablehloScatterDimensionNumbersGetScatterIndicesBatchingDimsElem(
+    MlirAttribute attr, intptr_t pos) {
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
+      .getScatterIndicesBatchingDims()[pos];
 }
 
 intptr_t stablehloScatterDimensionNumbersGetScatteredDimsToOperandDimsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ScatterDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
       .getScatterDimsToOperandDims()
       .size();
 }
 
 int64_t stablehloScatterDimensionNumbersGetScatteredDimsToOperandDimsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ScatterDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
       .getScatterDimsToOperandDims()[pos];
 }
 
 int64_t stablehloDimensionNumbersGetIndexVectorDim(MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ScatterDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ScatterDimensionNumbersAttr>(unwrap(attr))
       .getIndexVectorDim();
 }
 
@@ -95,66 +128,143 @@ int64_t stablehloDimensionNumbersGetIndexVectorDim(MlirAttribute attr) {
 MlirAttribute stablehloGatherDimensionNumbersGet(
     MlirContext ctx, intptr_t nOffsetDims, const int64_t *offsetDims,
     intptr_t nCollapsedSliceDims, const int64_t *collapsedSliceDims,
+    intptr_t nOperandBatchingDims, const int64_t *operandBatchingDims,
+    intptr_t nStartIndicesBatchingDims, const int64_t *startIndicesBatchingDims,
     intptr_t nStartIndexMap, const int64_t *startIndexMap,
     int64_t indexVectorDim) {
   return wrap(mlir::stablehlo::GatherDimensionNumbersAttr::get(
       unwrap(ctx), llvm::ArrayRef(offsetDims, nOffsetDims),
       llvm::ArrayRef(collapsedSliceDims, nCollapsedSliceDims),
+      llvm::ArrayRef(operandBatchingDims, nOperandBatchingDims),
+      llvm::ArrayRef(startIndicesBatchingDims, nStartIndicesBatchingDims),
       llvm::ArrayRef(startIndexMap, nStartIndexMap), indexVectorDim));
 }
 
 bool stablehloAttributeIsAGatherDimensionNumbers(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::GatherDimensionNumbersAttr>();
+  return llvm::isa<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr));
 }
 
 intptr_t stablehloGatherDimensionNumbersGetOffsetDimsSize(MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::GatherDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
       .getOffsetDims()
       .size();
 }
 
 int64_t stablehloGatherDimensionNumbersGetOffsetDimsElem(MlirAttribute attr,
                                                          intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::GatherDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
       .getOffsetDims()[pos];
 }
 
 intptr_t stablehloGatherDimensionNumbersGetCollapsedSliceDimsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::GatherDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
       .getCollapsedSliceDims()
       .size();
 }
 
 int64_t stablehloGatherDimensionNumbersGetCollapsedSliceDimsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::GatherDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
       .getCollapsedSliceDims()[pos];
+}
+
+intptr_t stablehloGatherDimensionNumbersGetOperandBatchingDimsSize(
+    MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
+      .getOperandBatchingDims()
+      .size();
+}
+
+int64_t stablehloGatherDimensionNumbersGetOperandBatchingDimsElem(
+    MlirAttribute attr, intptr_t pos) {
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
+      .getOperandBatchingDims()[pos];
+}
+
+intptr_t stablehloGatherDimensionNumbersGetStartIndicesBatchingDimsSize(
+    MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
+      .getStartIndicesBatchingDims()
+      .size();
+}
+
+int64_t stablehloGatherDimensionNumbersGetStartIndicesBatchingDimsElem(
+    MlirAttribute attr, intptr_t pos) {
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
+      .getStartIndicesBatchingDims()[pos];
 }
 
 intptr_t stablehloGatherDimensionNumbersGetStartIndexMapSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::GatherDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
       .getStartIndexMap()
       .size();
 }
 
 int64_t stablehloGatherDimensionNumbersGetStartIndexMapElem(MlirAttribute attr,
                                                             intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::GatherDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
       .getStartIndexMap()[pos];
 }
 
 int64_t stablehloGatherDimensionNumbersGetIndexVectorDim(MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::GatherDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::GatherDimensionNumbersAttr>(unwrap(attr))
       .getIndexVectorDim();
+}
+
+//===----------------------------------------------------------------------===//
+// DotAlgorithm
+//===----------------------------------------------------------------------===//
+
+MlirAttribute stablehloDotAlgorithmGet(
+    MlirContext ctx, MlirType lhsPrecisionType, MlirType rhsPrecisionType,
+    MlirType accumulationType, int64_t lhsComponentCount,
+    int64_t rhsComponentCount, int64_t numPrimitiveOperations,
+    bool allowImpreciseAccumulation) {
+  return wrap(mlir::stablehlo::DotAlgorithmAttr::get(
+      unwrap(ctx), unwrap(lhsPrecisionType), unwrap(rhsPrecisionType),
+      unwrap(accumulationType), lhsComponentCount, rhsComponentCount,
+      numPrimitiveOperations, allowImpreciseAccumulation));
+}
+
+bool stablehloAttributeIsADotAlgorithm(MlirAttribute attr) {
+  return llvm::isa<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr));
+}
+
+MlirType stablehloDotAlgorithmGetLhsPrecisionType(MlirAttribute attr) {
+  return wrap(llvm::cast<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr))
+                  .getLhsPrecisionType());
+}
+
+MlirType stablehloDotAlgorithmGetRhsPrecisionType(MlirAttribute attr) {
+  return wrap(llvm::cast<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr))
+                  .getRhsPrecisionType());
+}
+
+MlirType stablehloDotAlgorithmGetAccumulationType(MlirAttribute attr) {
+  return wrap(llvm::cast<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr))
+                  .getAccumulationType());
+}
+
+int64_t stablehloDotAlgorithmGetLhsComponentCount(MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr))
+      .getLhsComponentCount();
+}
+
+int64_t stablehloDotAlgorithmGetRhsComponentCount(MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr))
+      .getRhsComponentCount();
+}
+
+int64_t stablehloDotAlgorithmGetNumPrimitiveOperations(MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr))
+      .getNumPrimitiveOperations();
+}
+
+bool stablehloDotAlgorithmGetAllowImpreciseAccumulation(MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::DotAlgorithmAttr>(unwrap(attr))
+      .getAllowImpreciseAccumulation();
 }
 
 //===----------------------------------------------------------------------===//
@@ -176,66 +286,58 @@ MlirAttribute stablehloDotDimensionNumbersGet(
 }
 
 bool stablehloAttributeIsADotDimensionNumbers(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::DotDimensionNumbersAttr>();
+  return llvm::isa<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr));
 }
 
 intptr_t stablehloDotDimensionNumbersGetLhsBatchingDimensionsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getLhsBatchingDimensions()
       .size();
 }
 
 int64_t stablehloDotDimensionNumbersGetLhsBatchingDimensionsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getLhsBatchingDimensions()[pos];
 }
 
 intptr_t stablehloDotDimensionNumbersGetRhsBatchingDimensionsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getRhsBatchingDimensions()
       .size();
 }
 
 int64_t stablehloDotDimensionNumbersGetRhsBatchingDimensionsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getRhsBatchingDimensions()[pos];
 }
 
 intptr_t stablehloDotDimensionNumbersGetLhsContractingDimensionsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getLhsContractingDimensions()
       .size();
 }
 
 int64_t stablehloDotDimensionNumbersGetLhsContractingDimensionsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getLhsContractingDimensions()[pos];
 }
 
 intptr_t stablehloDotDimensionNumbersGetRhsContractingDimensionsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getRhsContractingDimensions()
       .size();
 }
 
 int64_t stablehloDotDimensionNumbersGetRhsContractingDimensionsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::DotDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::DotDimensionNumbersAttr>(unwrap(attr))
       .getRhsContractingDimensions()[pos];
 }
 
@@ -260,93 +362,81 @@ MlirAttribute stablehloConvDimensionNumbersGet(
 }
 
 bool stablehloAttributeIsAConvDimensionNumbers(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::ConvDimensionNumbersAttr>();
+  return llvm::isa<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr));
 }
 
 int64_t stablehloConvDimensionNumbersGetInputBatchDimension(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getInputBatchDimension();
 }
 
 int64_t stablehloConvDimensionNumbersGetInputFeatureDimension(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getInputFeatureDimension();
 }
 
 intptr_t stablehloConvDimensionNumbersGetInputSpatialDimensionsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getInputSpatialDimensions()
       .size();
 }
 
 int64_t stablehloConvDimensionNumbersGetInputSpatialDimensionsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getInputSpatialDimensions()[pos];
 }
 
 int64_t stablehloConvDimensionNumbersGetKernelInputFeatureDimension(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getKernelInputFeatureDimension();
 }
 
 int64_t stablehloConvDimensionNumbersGetKernelOutputFeatureDimension(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getKernelOutputFeatureDimension();
 }
 
 intptr_t stablehloConvDimensionNumbersGetKernelSpatialDimensionsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getKernelSpatialDimensions()
       .size();
 }
 
 int64_t stablehloConvDimensionNumbersGetKernelSpatialDimensionsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getKernelSpatialDimensions()[pos];
 }
 
 int64_t stablehloConvDimensionNumbersGetOutputBatchDimension(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getOutputBatchDimension();
 }
 
 int64_t stablehloConvDimensionNumbersGetOutputFeatureDimension(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getOutputFeatureDimension();
 }
 
 intptr_t stablehloConvDimensionNumbersGetOutputSpatialDimensionsSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getOutputSpatialDimensions()
       .size();
 }
 
 int64_t stablehloConvDimensionNumbersGetOutputSpatialDimensionsElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::ConvDimensionNumbersAttr>()
+  return llvm::cast<mlir::stablehlo::ConvDimensionNumbersAttr>(unwrap(attr))
       .getOutputSpatialDimensions()[pos];
 }
 
@@ -364,42 +454,37 @@ MLIR_CAPI_EXPORTED MlirAttribute stablehloOutputOperandAliasGet(
 }
 
 bool stablehloAttributeIsAOutputOperandAlias(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::OutputOperandAliasAttr>();
+  return llvm::isa<mlir::stablehlo::OutputOperandAliasAttr>(unwrap(attr));
 }
 
 intptr_t stablehloOutputOperandAliasGetOutputTupleIndicesSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::OutputOperandAliasAttr>()
+  return llvm::cast<mlir::stablehlo::OutputOperandAliasAttr>(unwrap(attr))
       .getOutputTupleIndices()
       .size();
 }
 
 int64_t stablehloOutputOperandAliasGetOutputTupleIndicesElem(MlirAttribute attr,
                                                              intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::OutputOperandAliasAttr>()
+  return llvm::cast<mlir::stablehlo::OutputOperandAliasAttr>(unwrap(attr))
       .getOutputTupleIndices()[pos];
 }
 
 int64_t stablehloOutputOperandAliasGetOperandIndex(MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::OutputOperandAliasAttr>()
+  return llvm::cast<mlir::stablehlo::OutputOperandAliasAttr>(unwrap(attr))
       .getOperandIndex();
 }
 
 intptr_t stablehloOutputOperandAliasGetOperandTupleIndicesSize(
     MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::OutputOperandAliasAttr>()
+  return llvm::cast<mlir::stablehlo::OutputOperandAliasAttr>(unwrap(attr))
       .getOperandTupleIndices()
       .size();
 }
 
 int64_t stablehloOutputOperandAliasGetOperandTupleIndicesElem(
     MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::OutputOperandAliasAttr>()
+  return llvm::cast<mlir::stablehlo::OutputOperandAliasAttr>(unwrap(attr))
       .getOperandTupleIndices()[pos];
 }
 
@@ -417,13 +502,12 @@ MlirAttribute stablehloComparisonDirectionAttrGet(MlirContext ctx,
 }
 
 bool stablehloAttributeIsAComparisonDirectionAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::ComparisonDirectionAttr>();
+  return llvm::isa<mlir::stablehlo::ComparisonDirectionAttr>(unwrap(attr));
 }
 
 MlirStringRef stablehloComparisonDirectionAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::stablehlo::stringifyComparisonDirection(
-      unwrap(attr)
-          .cast<mlir::stablehlo::ComparisonDirectionAttr>()
+      llvm::cast<mlir::stablehlo::ComparisonDirectionAttr>(unwrap(attr))
           .getValue()));
 }
 
@@ -441,12 +525,13 @@ MlirAttribute stablehloComparisonTypeAttrGet(MlirContext ctx,
 }
 
 bool stablehloAttributeIsAComparisonTypeAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::ComparisonTypeAttr>();
+  return llvm::isa<mlir::stablehlo::ComparisonTypeAttr>(unwrap(attr));
 }
 
 MlirStringRef stablehloComparisonTypeAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::stablehlo::stringifyComparisonType(
-      unwrap(attr).cast<mlir::stablehlo::ComparisonTypeAttr>().getValue()));
+      llvm::cast<mlir::stablehlo::ComparisonTypeAttr>(unwrap(attr))
+          .getValue()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -462,12 +547,12 @@ MlirAttribute stablehloPrecisionAttrGet(MlirContext ctx, MlirStringRef value) {
 }
 
 bool stablehloAttributeIsAPrecisionAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::PrecisionAttr>();
+  return llvm::isa<mlir::stablehlo::PrecisionAttr>(unwrap(attr));
 }
 
 MlirStringRef stablehloPrecisionAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::stablehlo::stringifyPrecision(
-      unwrap(attr).cast<mlir::stablehlo::PrecisionAttr>().getValue()));
+      llvm::cast<mlir::stablehlo::PrecisionAttr>(unwrap(attr)).getValue()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -482,12 +567,12 @@ MlirAttribute stablehloFftTypeAttrGet(MlirContext ctx, MlirStringRef value) {
 }
 
 bool stablehloAttributeIsAFftTypeAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::FftTypeAttr>();
+  return llvm::isa<mlir::stablehlo::FftTypeAttr>(unwrap(attr));
 }
 
 MlirStringRef stablehloFftTypeAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::stablehlo::stringifyFftType(
-      unwrap(attr).cast<mlir::stablehlo::FftTypeAttr>().getValue()));
+      llvm::cast<mlir::stablehlo::FftTypeAttr>(unwrap(attr)).getValue()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -503,12 +588,12 @@ MlirAttribute stablehloTransposeAttrGet(MlirContext ctx, MlirStringRef value) {
 }
 
 bool stablehloAttributeIsATransposeAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::TransposeAttr>();
+  return llvm::isa<mlir::stablehlo::TransposeAttr>(unwrap(attr));
 }
 
 MlirStringRef stablehloTransposeAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::stablehlo::stringifyTranspose(
-      unwrap(attr).cast<mlir::stablehlo::TransposeAttr>().getValue()));
+      llvm::cast<mlir::stablehlo::TransposeAttr>(unwrap(attr)).getValue()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -525,12 +610,13 @@ MlirAttribute stablehloRngDistributionAttrGet(MlirContext ctx,
 }
 
 bool stablehloAttributeIsARngDistributionAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::RngDistributionAttr>();
+  return llvm::isa<mlir::stablehlo::RngDistributionAttr>(unwrap(attr));
 }
 
 MlirStringRef stablehloRngDistributionAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::stablehlo::stringifyRngDistribution(
-      unwrap(attr).cast<mlir::stablehlo::RngDistributionAttr>().getValue()));
+      llvm::cast<mlir::stablehlo::RngDistributionAttr>(unwrap(attr))
+          .getValue()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -547,12 +633,12 @@ MlirAttribute stablehloRngAlgorithmAttrGet(MlirContext ctx,
 }
 
 bool stablehloAttributeIsARngAlgorithmAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::RngAlgorithmAttr>();
+  return llvm::isa<mlir::stablehlo::RngAlgorithmAttr>(unwrap(attr));
 }
 
 MlirStringRef stablehloRngAlgorithmAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::stablehlo::stringifyRngAlgorithm(
-      unwrap(attr).cast<mlir::stablehlo::RngAlgorithmAttr>().getValue()));
+      llvm::cast<mlir::stablehlo::RngAlgorithmAttr>(unwrap(attr)).getValue()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -566,15 +652,16 @@ MlirAttribute stablehloChannelHandleGet(MlirContext ctx, int64_t handle,
 }
 
 bool stablehloAttributeIsChannelHandle(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::ChannelHandleAttr>();
+  return llvm::isa<mlir::stablehlo::ChannelHandleAttr>(unwrap(attr));
 }
 
 int64_t stablehloChannelHandleGetHandle(MlirAttribute attr) {
-  return unwrap(attr).cast<mlir::stablehlo::ChannelHandleAttr>().getHandle();
+  return llvm::cast<mlir::stablehlo::ChannelHandleAttr>(unwrap(attr))
+      .getHandle();
 }
 
 int64_t stablehloChannelHandleGetType(MlirAttribute attr) {
-  return unwrap(attr).cast<mlir::stablehlo::ChannelHandleAttr>().getType();
+  return llvm::cast<mlir::stablehlo::ChannelHandleAttr>(unwrap(attr)).getType();
 }
 
 //===----------------------------------------------------------------------===//
@@ -588,18 +675,82 @@ MlirAttribute stablehloTypeExtensionsGet(MlirContext ctx, intptr_t nBounds,
 }
 
 bool stablehloAttributeIsTypeExtensions(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::stablehlo::TypeExtensionsAttr>();
+  return llvm::isa<mlir::stablehlo::TypeExtensionsAttr>(unwrap(attr));
 }
 
 intptr_t stablehloTypeExtensionsGetBoundsSize(MlirAttribute attr) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::TypeExtensionsAttr>()
+  return llvm::cast<mlir::stablehlo::TypeExtensionsAttr>(unwrap(attr))
       .getBounds()
       .size();
 }
 
 int64_t stablehloTypeExtensionsGetBoundsElem(MlirAttribute attr, intptr_t pos) {
-  return unwrap(attr)
-      .cast<mlir::stablehlo::TypeExtensionsAttr>()
+  return llvm::cast<mlir::stablehlo::TypeExtensionsAttr>(unwrap(attr))
       .getBounds()[pos];
+}
+
+//===----------------------------------------------------------------------===//
+// ResultAccuracyModeAttr
+//===----------------------------------------------------------------------===//
+
+MlirAttribute stablehloResultAccuracyModeAttrGet(MlirContext ctx,
+                                                 MlirStringRef value) {
+  std::optional<mlir::stablehlo::ResultAccuracyMode> accuracyMode =
+      mlir::stablehlo::symbolizeResultAccuracyMode(unwrap(value));
+  if (!accuracyMode) llvm::report_fatal_error("Invalid value.");
+  return wrap(mlir::stablehlo::ResultAccuracyModeAttr::get(
+      unwrap(ctx), accuracyMode.value()));
+}
+
+bool stablehloAttributeIsAResultAccuracyModeAttr(MlirAttribute attr) {
+  return llvm::isa<mlir::stablehlo::ResultAccuracyModeAttr>(unwrap(attr));
+}
+
+MlirStringRef stablehloResultAccuracyModeAttrGetValue(MlirAttribute attr) {
+  return wrap(mlir::stablehlo::stringifyResultAccuracyMode(
+      llvm::cast<mlir::stablehlo::ResultAccuracyModeAttr>(unwrap(attr))
+          .getValue()));
+}
+//===----------------------------------------------------------------------===//
+// ResultAccuracyAttr
+//===----------------------------------------------------------------------===//
+
+MlirAttribute stablehloResultAccuracyAttrGet(MlirContext ctx, double atol,
+                                             double rtol, int64_t ulps,
+                                             MlirStringRef mode) {
+  std::optional<mlir::stablehlo::ResultAccuracyMode> accuracyMode =
+      mlir::stablehlo::symbolizeResultAccuracyMode(unwrap(mode));
+  if (!accuracyMode) llvm::report_fatal_error("Invalid value.");
+  mlir::stablehlo::ResultAccuracyModeAttr modeAttr =
+      mlir::stablehlo::ResultAccuracyModeAttr::get(unwrap(ctx),
+                                                   accuracyMode.value());
+  return wrap(mlir::stablehlo::ResultAccuracyAttr::get(
+      unwrap(ctx), llvm::APFloat(atol), llvm::APFloat(rtol), ulps, modeAttr));
+}
+
+bool stablehloAttributeIsAResultAccuracyAttr(MlirAttribute attr) {
+  return llvm::isa<mlir::stablehlo::ResultAccuracyAttr>(unwrap(attr));
+}
+
+double stablehloResultAccuracyAttrGetAtol(MlirAttribute attr) {
+  llvm::APFloat result =
+      llvm::cast<mlir::stablehlo::ResultAccuracyAttr>(unwrap(attr)).getAtol();
+  return result.convertToDouble();
+}
+
+double stablehloResultAccuracyAttrGetRtol(MlirAttribute attr) {
+  llvm::APFloat result =
+      llvm::cast<mlir::stablehlo::ResultAccuracyAttr>(unwrap(attr)).getRtol();
+  return result.convertToDouble();
+}
+
+int64_t stablehloResultAccuracyAttrGetUlps(MlirAttribute attr) {
+  return llvm::cast<mlir::stablehlo::ResultAccuracyAttr>(unwrap(attr))
+      .getUlps();
+}
+
+MlirAttribute stablehloResultAccuracyAttrGetMode(MlirAttribute attr) {
+  mlir::stablehlo::ResultAccuracyModeAttr modeAttr =
+      llvm::cast<mlir::stablehlo::ResultAccuracyAttr>(unwrap(attr)).getMode();
+  return wrap(modeAttr);
 }

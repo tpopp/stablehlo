@@ -15,6 +15,10 @@ limitations under the License.
 
 #include <optional>
 
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "mlir-c/IR.h"
+#include "mlir-c/Support.h"
 #include "mlir/CAPI/IR.h"
 #include "mlir/CAPI/Support.h"
 #include "stablehlo/dialect/ChloOps.h"
@@ -33,12 +37,13 @@ MlirAttribute chloComparisonDirectionAttrGet(MlirContext ctx,
 }
 
 bool chloAttributeIsAComparisonDirectionAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::chlo::ComparisonDirectionAttr>();
+  return llvm::isa<mlir::chlo::ComparisonDirectionAttr>(unwrap(attr));
 }
 
 MlirStringRef chloComparisonDirectionAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::chlo::stringifyComparisonDirection(
-      unwrap(attr).cast<mlir::chlo::ComparisonDirectionAttr>().getValue()));
+      llvm::cast<mlir::chlo::ComparisonDirectionAttr>(unwrap(attr))
+          .getValue()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -54,10 +59,10 @@ MlirAttribute chloComparisonTypeAttrGet(MlirContext ctx, MlirStringRef value) {
 }
 
 bool chloAttributeIsAComparisonTypeAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<mlir::chlo::ComparisonTypeAttr>();
+  return llvm::isa<mlir::chlo::ComparisonTypeAttr>(unwrap(attr));
 }
 
 MlirStringRef chloComparisonTypeAttrGetValue(MlirAttribute attr) {
   return wrap(mlir::chlo::stringifyComparisonType(
-      unwrap(attr).cast<mlir::chlo::ComparisonTypeAttr>().getValue()));
+      llvm::cast<mlir::chlo::ComparisonTypeAttr>(unwrap(attr)).getValue()));
 }

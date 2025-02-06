@@ -19,6 +19,7 @@ limitations under the License.
 
 include "mlir/IR/OpBase.td"
 include "mlir/IR/TensorEncoding.td"
+include "stablehlo/dialect/StablehloTypes.td"
 
 def StableHLO_Dims : ArrayRefParameter<"int64_t", "Dimension"> {
   let parser = "parseDimSizes($_parser)";
@@ -26,12 +27,13 @@ def StableHLO_Dims : ArrayRefParameter<"int64_t", "Dimension"> {
 }
 
 def StableHLO_ScatterDimensionNumbers : AttrDef<StableHLO_Dialect, "ScatterDimensionNumbers"> {
-  let cppNamespace = "::mlir::stablehlo";
   let mnemonic = "scatter";
   let summary = "Attribute that models the dimension information for scatter";
   let parameters = (ins
       StableHLO_Dims:$updateWindowDims,
       StableHLO_Dims:$insertedWindowDims,
+      StableHLO_Dims:$inputBatchingDims,
+      StableHLO_Dims:$scatterIndicesBatchingDims,
       StableHLO_Dims:$scatterDimsToOperandDims,
       "int64_t":$indexVectorDim
   );
@@ -39,20 +41,46 @@ def StableHLO_ScatterDimensionNumbers : AttrDef<StableHLO_Dialect, "ScatterDimen
 }
 
 def StableHLO_GatherDimensionNumbers : AttrDef<StableHLO_Dialect, "GatherDimensionNumbers"> {
-  let cppNamespace = "::mlir::stablehlo";
   let mnemonic = "gather";
   let summary = "Attribute that models the dimension information for gather";
   let parameters = (ins
       StableHLO_Dims:$offsetDims,
       StableHLO_Dims:$collapsedSliceDims,
+      StableHLO_Dims:$operandBatchingDims,
+      StableHLO_Dims:$startIndicesBatchingDims,
       StableHLO_Dims:$startIndexMap,
       "int64_t":$indexVectorDim
   );
   let hasCustomAssemblyFormat = 1;
 }
 
+def StableHLO_DotAlgorithm : AttrDef<StableHLO_Dialect, "DotAlgorithm"> {
+  let mnemonic = "dot_algorithm";
+  let summary = "Attribute that models the algorithm constraints to use for computing dot.";
+  let parameters = (ins
+      "Type":$lhsPrecisionType,
+      "Type":$rhsPrecisionType,
+      "Type":$accumulationType,
+      "int64_t":$lhsComponentCount,
+      "int64_t":$rhsComponentCount,
+      "int64_t":$numPrimitiveOperations,
+      "bool":$allowImpreciseAccumulation
+  );
+  let assemblyFormat = [{
+    `<`
+      `lhs_precision_type` `=` $lhsPrecisionType `,`
+      `rhs_precision_type` `=` $rhsPrecisionType `,`
+      `accumulation_type` `=` $accumulationType `,`
+      `lhs_component_count` `=` $lhsComponentCount `,`
+      `rhs_component_count` `=` $rhsComponentCount `,`
+      `num_primitive_operations` `=` $numPrimitiveOperations `,`
+      `allow_imprecise_accumulation` `=` $allowImpreciseAccumulation
+    `>`
+  }];
+  let genVerifyDecl = 1;
+}
+
 def StableHLO_DotDimensionNumbers : AttrDef<StableHLO_Dialect, "DotDimensionNumbers"> {
-  let cppNamespace = "::mlir::stablehlo";
   let mnemonic = "dot";
   let summary = "Attribute that models the dimension information for dot.";
   let parameters = (ins
@@ -65,7 +93,6 @@ def StableHLO_DotDimensionNumbers : AttrDef<StableHLO_Dialect, "DotDimensionNumb
 }
 
 def StableHLO_OutputOperandAlias : AttrDef<StableHLO_Dialect, "OutputOperandAlias"> {
-  let cppNamespace = "::mlir::stablehlo";
   let mnemonic = "output_operand_alias";
   let summary =
     "Attribute that models the alias relationship of output and operand of a CustomCall op";
@@ -108,44 +135,11 @@ def StableHLO_OutputOperandAlias : AttrDef<StableHLO_Dialect, "OutputOperandAlia
   }];
 }
 
-def StableHLO_ArgResultAlias : AttrDef<StableHLO_Dialect, "ArgResultAlias"> {
-  let cppNamespace = "::mlir::stablehlo";
-  let mnemonic = "result_alias";
-  let summary =
-    "Attribute that models the alias relationship of entry function argument";
-  let description = [{
-    This attribute captures the alias relationship of a main function
-    argument to one of the results, denoted by `resultIndex`. The
-    `argTupleIndices` and `resultTupleIndices` are used to index into nested
-    tuples in operand and result respectively. If `isMustAlias` is true then the
-    operand-result pair must alias.
-
-    This is meant to be used as an attribute on a function argument.
-    For example, in the following code it expresses that `%arg1` may alias 0-th
-    result.
-
-    ```mlir
-    func @main(%arg0: tensor<2xf32>, %arg1: tensor<3xf32>
-      {stablehlo.result_alias = stablehlo.result_alias<result_index = [2], ...>}
-      ) -> tensor<2xf32>, tensor<3xf32> {
-      // function body ...
-    }
-    ```
-  }];
-  let parameters = (ins
-    StableHLO_Dims:$argTupleIndices,
-    "int64_t":$resultIndex,
-    StableHLO_Dims:$resultTupleIndices,
-    "bool":$isMustAlias
-  );
-  let hasCustomAssemblyFormat = 1;
-}
-
 // Represents a unique identifier for each Send/Recv instruction pair or
-// optionally for collective instructions (AllReduce, CollectivePermute,
-// AllToAll). Non-positive channel_id handle is equivalent to no channel id.
+// optionally for collective instructions (AllToAll, AllReduce,
+// CollectiveBroadcast, and CollectivePermute). Non-positive channel_id
+// handle is equivalent to no channel id.
 def StableHLO_ChannelHandle : AttrDef<StableHLO_Dialect, "ChannelHandle"> {
-  let cppNamespace = "::mlir::stablehlo";
   let mnemonic = "channel_handle";
   let parameters = (ins "int64_t":$handle, "int64_t":$type);
   let summary = "two 64-bit integers 'handle' and 'type'";
@@ -155,7 +149,6 @@ def StableHLO_ChannelHandle : AttrDef<StableHLO_Dialect, "ChannelHandle"> {
 def StableHLO_TypeExtensions : AttrDef<StableHLO_Dialect, "TypeExtensions", [
     DeclareAttrInterfaceMethods<VerifiableTensorEncoding>,
     DeclareAttrInterfaceMethods<HLO_BoundedAttrInterface>]> {
-  let cppNamespace = "::mlir::stablehlo";
   let mnemonic = "type_extensions";
 
   // TODO(b/238903065): Move sparsity related info here from the standalone
@@ -179,7 +172,7 @@ def StableHLO_TypeExtensions : AttrDef<StableHLO_Dialect, "TypeExtensions", [
 // A layout attribute (1D tensor of index type)
 def StableHLO_LayoutAttr : Attr<
   And<[IndexElementsAttr.predicate,
-       CPred<[{$_self.cast<::mlir::DenseIntElementsAttr>().getType().getRank()
+       CPred<[{cast<::mlir::DenseIntElementsAttr>($_self).getType().getRank()
                == 1}]>]>,
   "A 1D tensor of index type (layout)"> {
   let storageType = IndexElementsAttr.storageType;
@@ -198,19 +191,7 @@ def StableHLO_FlatSymbolRefArrayAttr :
   let constBuilderCall = "::mlir::ArrayAttr::get($_builder.getContext(), $0)";
 }
 
-def StableHLO_BoolElementsAttr :
-    ElementsAttrBase<
-      And<[CPred<"$_self.isa<::mlir::DenseIntOrFPElementsAttr>()">,
-           CPred<"$_self.cast<::mlir::DenseIntOrFPElementsAttr>().getType().getElementType().isInteger(1)">]>,
-      "constant boolean vector/tensor attribute"> {
-  let storageType = [{ ::mlir::DenseElementsAttr }];
-  let returnType = [{ ::mlir::DenseElementsAttr }];
-
-  let convertFromStorage = "$_self";
-}
-
 def StableHLO_ConvDimensionNumbers : AttrDef<StableHLO_Dialect, "ConvDimensionNumbers"> {
-  let cppNamespace = "::mlir::stablehlo";
   let mnemonic = "conv";
   let summary = "Structure of dimension information for conv op";
   let parameters = (ins
@@ -229,23 +210,18 @@ def StableHLO_ConvDimensionNumbers : AttrDef<StableHLO_Dialect, "ConvDimensionNu
   let hasCustomAssemblyFormat = 1;
 }
 
-def StableHLO_ConvolutionAttributes {
-  dag attributes = (ins
-    // Default value: one for each of the spatial dimension.
-    OptionalAttr<I64ElementsAttr>:$window_strides,
-    // Default value: two zeros for each of the spatial dimension.
-    OptionalAttr<I64ElementsAttr>:$padding,
-    // Default value: one for each of the spatial dimension.
-    OptionalAttr<I64ElementsAttr>:$lhs_dilation,
-    // Default value: one for each of the spatial dimension.
-    OptionalAttr<I64ElementsAttr>:$rhs_dilation,
-    // Default value: false for each of the spatial dimension.
-    OptionalAttr<StableHLO_BoolElementsAttr>:$window_reversal,
-    StableHLO_ConvDimensionNumbers:$dimension_numbers,
-    I64Attr:$feature_group_count,
-    I64Attr:$batch_group_count,
-    StableHLO_PrecisionConfigAttr:$precision_config
+def StableHLO_ResultAccuracyAttr : AttrDef<StableHLO_Dialect, "ResultAccuracy"> {
+  let mnemonic = "result_accuracy";
+  let summary = "The requested accuracy for transcendental unary ops.";
+  let parameters = (ins
+      "APFloat":$atol,
+      "APFloat":$rtol,
+      "int64_t":$ulps,
+      StableHLO_ResultAccuracyModeAttr:$mode
   );
+  let hasCustomAssemblyFormat = 1;
+  let genVerifyDecl = 1;
+  let constBuilderCall = "ResultAccuracyAttr::get($_builder.getContext(), APFloat(0.0), APFloat(0.0), 0, ResultAccuracyModeAttr::get($_builder.getContext(), $0))";
 }
 
 #endif // STABLEHLO_DIALECT_STABLEHLO_ATTRS

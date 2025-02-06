@@ -13,9 +13,9 @@ limitations under the License.
 #ifndef STABLEHLO_INTEGRATIONS_C_STABLEHLO_ATTRIBUTES_H
 #define STABLEHLO_INTEGRATIONS_C_STABLEHLO_ATTRIBUTES_H
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <sys/types.h>
-
-#include <optional>
 
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
@@ -32,6 +32,9 @@ MLIR_CAPI_EXPORTED MlirAttribute stablehloScatterDimensionNumbersGet(
     MlirContext ctx,                                                  //
     intptr_t nUpdateWindowDims, const int64_t *updateWindowDims,      //
     intptr_t nInsertedWindowDims, const int64_t *insertedWindowDims,  //
+    intptr_t nInputBatchingDims, const int64_t *inputBatchingDims,    //
+    intptr_t nScatterIndicesBatchingDims,                             //
+    const int64_t *scatterIndicesBatchingDims,                        //
     intptr_t nScatteredDimsToOperandDims,                             //
     const int64_t *scatteredDimsToOperandDims,                        //
     int64_t indexVectorDim);
@@ -50,6 +53,17 @@ MLIR_CAPI_EXPORTED int64_t
 stablehloScatterDimensionNumbersGetInsertedWindowDimsElem(MlirAttribute attr,
                                                           intptr_t pos);
 MLIR_CAPI_EXPORTED intptr_t
+stablehloScatterDimensionNumbersGetInputBatchingDimsSize(MlirAttribute attr);
+MLIR_CAPI_EXPORTED int64_t
+stablehloScatterDimensionNumbersGetInputBatchingDimsElem(MlirAttribute attr,
+                                                         intptr_t pos);
+MLIR_CAPI_EXPORTED intptr_t
+stablehloScatterDimensionNumbersGetScatterIndicesBatchingDimsSize(
+    MlirAttribute attr);
+MLIR_CAPI_EXPORTED int64_t
+stablehloScatterDimensionNumbersGetScatterIndicesBatchingDimsElem(
+    MlirAttribute attr, intptr_t pos);
+MLIR_CAPI_EXPORTED intptr_t
 stablehloScatterDimensionNumbersGetScatteredDimsToOperandDimsSize(
     MlirAttribute attr);
 MLIR_CAPI_EXPORTED int64_t
@@ -65,6 +79,8 @@ stablehloDimensionNumbersGetIndexVectorDim(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute stablehloGatherDimensionNumbersGet(
     MlirContext ctx, intptr_t nOffsetDims, const int64_t *offsetDims,
     intptr_t nCollapsedSliceDims, const int64_t *collapsedSliceDims,
+    intptr_t nOperandBatchingDims, const int64_t *operandBatchingDims,
+    intptr_t nStartIndicesBatchingDims, const int64_t *startIndicesBatchingDims,
     intptr_t nStartIndexMap, const int64_t *startIndexMap,
     int64_t indexVectorDim);
 
@@ -81,11 +97,55 @@ MLIR_CAPI_EXPORTED int64_t
 stablehloGatherDimensionNumbersGetCollapsedSliceDimsElem(MlirAttribute attr,
                                                          intptr_t pos);
 MLIR_CAPI_EXPORTED intptr_t
+stablehloGatherDimensionNumbersGetOperandBatchingDimsSize(MlirAttribute attr);
+MLIR_CAPI_EXPORTED int64_t
+stablehloGatherDimensionNumbersGetOperandBatchingDimsElem(MlirAttribute attr,
+                                                          intptr_t pos);
+MLIR_CAPI_EXPORTED intptr_t
+stablehloGatherDimensionNumbersGetStartIndicesBatchingDimsSize(
+    MlirAttribute attr);
+MLIR_CAPI_EXPORTED int64_t
+stablehloGatherDimensionNumbersGetStartIndicesBatchingDimsElem(
+    MlirAttribute attr, intptr_t pos);
+MLIR_CAPI_EXPORTED intptr_t
 stablehloGatherDimensionNumbersGetStartIndexMapSize(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int64_t stablehloGatherDimensionNumbersGetStartIndexMapElem(
     MlirAttribute attr, intptr_t pos);
 MLIR_CAPI_EXPORTED int64_t
 stablehloGatherDimensionNumbersGetIndexVectorDim(MlirAttribute attr);
+
+//===----------------------------------------------------------------------===//
+// DotAlgorithm
+//===----------------------------------------------------------------------===//
+
+MLIR_CAPI_EXPORTED MlirAttribute stablehloDotAlgorithmGet(
+    MlirContext ctx, MlirType lhsPrecisionType, MlirType rhsPrecisionType,
+    MlirType accumulationType, int64_t lhsComponentCount,
+    int64_t rhsComponentCount, int64_t numPrimitiveOperations,
+    bool allowImpreciseAccumulation);
+
+MLIR_CAPI_EXPORTED bool stablehloAttributeIsADotAlgorithm(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirType
+stablehloDotAlgorithmGetLhsPrecisionType(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirType
+stablehloDotAlgorithmGetRhsPrecisionType(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirType
+stablehloDotAlgorithmGetAccumulationType(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t
+stablehloDotAlgorithmGetLhsComponentCount(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t
+stablehloDotAlgorithmGetRhsComponentCount(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t
+stablehloDotAlgorithmGetNumPrimitiveOperations(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED bool stablehloDotAlgorithmGetAllowImpreciseAccumulation(
+    MlirAttribute attr);
 
 //===----------------------------------------------------------------------===//
 // DotDimensionNumbers
@@ -176,7 +236,7 @@ stablehloConvDimensionNumbersGetOutputSpatialDimensionsElem(MlirAttribute attr,
 //===----------------------------------------------------------------------===//
 
 // Creates a new OutputOperandAlias attribute with the given parameters. The
-// pairs of consecutive intptr_t / int64_t* arguments are interpeted as sized
+// pairs of consecutive intptr_t / int64_t* arguments are interpreted as sized
 // arrays.
 MLIR_CAPI_EXPORTED MlirAttribute stablehloOutputOperandAliasGet(
     MlirContext ctx, intptr_t nOutputTupleIndices,
@@ -316,6 +376,42 @@ MLIR_CAPI_EXPORTED intptr_t
 stablehloTypeExtensionsGetBoundsSize(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int64_t
 stablehloTypeExtensionsGetBoundsElem(MlirAttribute attr, intptr_t pos);
+
+// ===---------------------------------------------------------------------===//
+// ResultAccuracyModeAttr
+//===----------------------------------------------------------------------===//
+
+MLIR_CAPI_EXPORTED MlirAttribute
+stablehloResultAccuracyModeAttrGet(MlirContext ctx, MlirStringRef value);
+
+MLIR_CAPI_EXPORTED bool stablehloAttributeIsAResultAccuracyModeAttr(
+    MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirStringRef
+stablehloResultAccuracyModeAttrGetValue(MlirAttribute attr);
+
+// ===---------------------------------------------------------------------===//
+// ResultAccuracyAttr
+//===----------------------------------------------------------------------===//
+
+MLIR_CAPI_EXPORTED MlirAttribute
+stablehloResultAccuracyAttrGet(MlirContext ctx, double atol, double rtol,
+                               int64_t ulps, MlirStringRef value);
+
+MLIR_CAPI_EXPORTED bool stablehloAttributeIsAResultAccuracyAttr(
+    MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED double stablehloResultAccuracyAttrGetAtol(
+    MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED double stablehloResultAccuracyAttrGetRtol(
+    MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t
+stablehloResultAccuracyAttrGetUlps(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute
+stablehloResultAccuracyAttrGetMode(MlirAttribute attr);
 
 #ifdef __cplusplus
 }

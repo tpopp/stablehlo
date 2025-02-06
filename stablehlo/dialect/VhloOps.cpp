@@ -16,27 +16,34 @@ limitations under the License.
 
 #include "stablehlo/dialect/VhloOps.h"
 
-#include <cstdint>
+#include <cassert>
+#include <string>
+#include <utility>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/TypeSwitch.h"
-#include "mlir/Dialect/Quant/QuantOps.h"
+#include "llvm/ADT/TypeSwitch.h"  // IWYU pragma: keep
+#include "llvm/Support/Casting.h"
 #include "mlir/Dialect/Shape/IR/Shape.h"
 #include "mlir/IR/Attributes.h"
-#include "mlir/IR/BuiltinAttributeInterfaces.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/FunctionImplementation.h"
+#include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
-#include "stablehlo/dialect/AssemblyFormat.h"
+#include "mlir/Support/TypeID.h"
+#include "stablehlo/dialect/AssemblyFormat.h"  // IWYU pragma: keep
+#include "stablehlo/dialect/Version.h"
 #include "stablehlo/dialect/VhloBytecode.h"
+#include "stablehlo/dialect/VhloTypes.h"
 
 namespace mlir {
 namespace vhlo {
@@ -58,7 +65,7 @@ Type convertTypeToBuiltinForPrint(Type type) {
     VhloToBuiltinPrintConverter() : VhloTypeConverter() {
       addVhloToBuiltinConversions();
     }
-    Attribute convertEncoding(Attribute attr) override { return attr; }
+    Attribute convertEncoding(Attribute attr) const override { return attr; }
   };
   VhloToBuiltinPrintConverter conv;
   return conv.convertType(type);
@@ -69,7 +76,7 @@ Type convertTypeToVhloForParse(Type type) {
     BuiltinToVhloParseConverter() : VhloTypeConverter() {
       addBuiltinToVhloConversions();
     }
-    Attribute convertEncoding(Attribute attr) override { return attr; }
+    Attribute convertEncoding(Attribute attr) const override { return attr; }
   };
   BuiltinToVhloParseConverter conv;
   return conv.convertType(type);
@@ -112,9 +119,8 @@ Attribute IntegerV1Attr::parse(AsmParser& parser, mlir::Type) {
 static void printAttributeDictionary(
     AsmPrinter& os, ArrayRef<std::pair<Attribute, Attribute>> values) {
   os << '{';
-  for (auto nvp : values) {
-    os << nvp.first << " = " << nvp.second;
-  }
+  llvm::interleaveComma(
+      values, os, [&](auto nvp) { os << nvp.first << " = " << nvp.second; });
   os << '}';
 }
 
@@ -141,12 +147,12 @@ ParseResult parseAttributeDictionary(
 // Print function using: @name(arg : type, ...) -> (res_type...) { body_ops }
 void printFunctionBody(OpAsmPrinter& p, Operation*, Attribute name,
                        Region& region, Attribute funcType) {
-  p.printSymbolName(name.cast<StringV1Attr>().getValue());
+  p.printSymbolName(cast<StringV1Attr>(name).getValue());
   p << '(';
   llvm::interleaveComma(region.getArguments(), p,
                         [&](auto arg) { p.printRegionArgument(arg); });
   p << ") -> (";
-  auto fnType = funcType.cast<TypeV1Attr>().getValue().cast<FunctionV1Type>();
+  auto fnType = cast<FunctionV1Type>(cast<TypeV1Attr>(funcType).getValue());
   llvm::interleaveComma(fnType.getOutputs(), p,
                         [&](auto res) { p.printType(res); });
   p << ") ";
@@ -178,11 +184,13 @@ ParseResult parseFunctionBody(OpAsmParser& parser, Attribute& name,
   return success();
 }
 
-void TensorV1Attr::print(mlir::AsmPrinter& p) const {
-  p << '<'
-    << DenseIntOrFPElementsAttr::getFromRawBuffer(
-           convertTypeToBuiltinForPrint(getType()), getData())
-    << '>';
+void TensorV1Attr::print(mlir::AsmPrinter& odsPrinter) const {
+  odsPrinter << '<'
+             << DenseIntOrFPElementsAttr::getFromRawBuffer(
+                    llvm::cast<ShapedType>(
+                        convertTypeToBuiltinForPrint(getType())),
+                    getData())
+             << '>';
 }
 
 // Parse tensor elements using DenseIntOrFPElementsAttr printing.
@@ -294,6 +302,91 @@ void VhloDialect::printAttribute(Attribute attr, DialectAsmPrinter& os) const {
   LogicalResult result = generatedAttributePrinter(attr, os);
   (void)result;
   assert(succeeded(result));
+}
+
+///////////////////////////
+// Op Constraint Versioning
+///////////////////////////
+// These could be migrated to ODS in VhloOps.td if we figured out a better way
+// to represent this sort of constraint in tablegen.
+
+namespace {
+Type getVhloElementType(Type tensorType) {
+  if (auto ranked = dyn_cast<RankedTensorV1Type>(tensorType)) {
+    return ranked.getElementType();
+  }
+  return cast<UnrankedTensorV1Type>(tensorType).getElementType();
+}
+
+bool checkIfOperandAndResultElementTypesMatch(TypeRange operandTypes,
+                                              TypeRange resultTypes) {
+  auto inputElementTypes = llvm::map_to_vector(
+      operandTypes, [](Type t) { return getVhloElementType(t); });
+  auto resultElementTypes = llvm::map_to_vector(
+      resultTypes, [](Type t) { return getVhloElementType(t); });
+
+  return llvm::all_of(
+      llvm::zip(inputElementTypes, resultElementTypes),
+      [&](auto pair) { return std::get<0>(pair) == std::get<1>(pair); });
+}
+
+// Allow mismatched operand and result types in reduce ops in v0.17.0
+LogicalResult verifyConstraint_0_17_0(mlir::Operation* op,
+                                      Version targetVersion) {
+  if (!checkIfOperandAndResultElementTypesMatch(op->getOperandTypes(),
+                                                op->getResultTypes()) &&
+      targetVersion < Version(0, 17, 0))
+    return failure();
+  return success();
+}
+
+LogicalResult verifyConstraint_1_3_0(mlir::Operation* op,
+                                     Version targetVersion) {
+  auto customCallOp = cast<mlir::vhlo::CustomCallOpV1>(op);
+  if (targetVersion < Version(1, 3, 0) &&
+      (isa<vhlo::DictionaryV1Attr>(customCallOp.getBackendConfig()) ||
+       mlir::cast<CustomCallApiVersionV1Attr>(customCallOp.getApiVersion())
+               .getValue() == CustomCallApiVersionV1::API_VERSION_TYPED_FFI)) {
+    return failure();
+  }
+  return success();
+}
+
+}  // namespace
+
+LogicalResult AllReduceOpV1::validateConstraint(mlir::Operation* op,
+                                                Version targetVersion) {
+  return verifyConstraint_0_17_0(op, targetVersion);
+}
+
+LogicalResult ReduceOpV1::validateConstraint(mlir::Operation* op,
+                                             Version targetVersion) {
+  return verifyConstraint_0_17_0(op, targetVersion);
+}
+
+LogicalResult ReduceScatterOpV1::validateConstraint(mlir::Operation* op,
+                                                    Version targetVersion) {
+  return verifyConstraint_0_17_0(op, targetVersion);
+}
+
+LogicalResult ReduceWindowOpV1::validateConstraint(mlir::Operation* op,
+                                                   Version targetVersion) {
+  return verifyConstraint_0_17_0(op, targetVersion);
+}
+
+LogicalResult ScatterOpV1::validateConstraint(mlir::Operation* op,
+                                              Version targetVersion) {
+  return verifyConstraint_0_17_0(op, targetVersion);
+}
+
+LogicalResult SelectAndScatterOpV1::validateConstraint(mlir::Operation* op,
+                                                       Version targetVersion) {
+  return verifyConstraint_0_17_0(op, targetVersion);
+}
+
+LogicalResult CustomCallOpV1::validateConstraint(mlir::Operation* op,
+                                                 Version targetVersion) {
+  return verifyConstraint_1_3_0(op, targetVersion);
 }
 
 }  // namespace vhlo

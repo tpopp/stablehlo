@@ -13,6 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+add_mlir_public_c_api_library(CheckCAPI
+  PARTIAL_SOURCES_INTENDED
+  CheckDialect.cpp
+
+  LINK_LIBS PUBLIC
+  CheckOps
+)
+
 add_mlir_public_c_api_library(ChloCAPI
   PARTIAL_SOURCES_INTENDED
   ChloAttributes.cpp
@@ -26,10 +34,22 @@ add_mlir_public_c_api_library(StablehloCAPI
   PARTIAL_SOURCES_INTENDED
   StablehloAttributes.cpp
   StablehloDialect.cpp
+  StablehloPasses.cpp
   StablehloTypes.cpp
+  StablehloDialectApi.cpp
+  StablehloUnifiedApi.cpp
 
   LINK_LIBS PUBLIC
+  MLIRCAPIIR
+  MLIRIR
+  MLIRSupport  # LLVMSupport is automatically added in AddLLVM.cmake.
   StablehloOps
+  StablehloPasses
+  StablehloPortableApi
+  StablehloReferenceApi
+  StablehloReferenceConfiguration
+  StablehloSerialization
+  Version
 )
 
 add_mlir_public_c_api_library(VhloCAPI

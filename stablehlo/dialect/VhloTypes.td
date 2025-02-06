@@ -38,15 +38,14 @@ class VHLO_TypeDef<string cppName, string name, string minVersion, string maxVer
   let mnemonic = name;
   let extraClassDeclaration = [{
     mlir::vhlo::Version getMinVersion() {
-      auto version = mlir::vhlo::Version::fromString("}] #  minVersion # [{");
-      if (failed(version)) llvm::report_fatal_error("invalid version }] # minVersion # [{ in }] # name # [{");
-      return *version;
+      return mlir::vhlo::Version(}] # !subst(".", ", ", minVersion) # [{);
     }
     mlir::vhlo::Version getMaxVersion() {
-      if (!strcmp("}] # maxVersion # [{", "current")) return Version::getCurrentVersion();
-      auto version = mlir::vhlo::Version::fromString("}] #  maxVersion # [{");
-      if (failed(version)) llvm::report_fatal_error("invalid version }] # maxVersion # [{ in }] # name # [{");
-      return *version;
+      }] # !if(
+        !eq(maxVersion, "current"),
+        [{ return mlir::vhlo::Version::getCurrentVersion(); }],
+        [{ return mlir::vhlo::Version("}] # !subst(".", ", ", maxVersion) # [{"); }]
+      ) # [{
     }
   }];
 }
@@ -80,11 +79,41 @@ def VHLO_FloatF32V1 : VHLO_TypeDef<"FloatF32V1", "f32_v1", "0.9.0", "current">;
 // Corresponds to the 'f64' FloatType from the StableHLO spec.
 def VHLO_FloatF64V1 : VHLO_TypeDef<"FloatF64V1","f64_v1", "0.9.0", "current">;
 
+// Corresponds to the 'f4E2M1FN' FloatType from the StableHLO spec.
+def VHLO_FloatF4E2M1FNV1 : VHLO_TypeDef<"FloatF4E2M1FNV1", "f4E2M1FN_v1", "1.8.0", "current">;
+
+// Corresponds to the 'f6E2M3FN' FloatType from the StableHLO spec.
+def VHLO_FloatF6E2M3FNV1 : VHLO_TypeDef<"FloatF6E2M3FNV1", "f6E2M3FN_v1", "1.8.0", "current">;
+
+// Corresponds to the 'f6E3M2FN' FloatType from the StableHLO spec.
+def VHLO_FloatF6E3M2FNV1 : VHLO_TypeDef<"FloatF6E3M2FNV1", "f6E3M2FN_v1", "1.8.0", "current">;
+
+// Corresponds to the 'f8E3M4' FloatType from the StableHLO spec.
+def VHLO_FloatF8E3M4V1 : VHLO_TypeDef<"FloatF8E3M4V1", "f8E3M4_v1", "1.7.0", "current">;
+
+// Corresponds to the 'f8E4M3' FloatType from the StableHLO spec.
+def VHLO_FloatF8E4M3V1 : VHLO_TypeDef<"FloatF8E4M3V1", "f8E4M3_v1", "1.7.0", "current">;
+
 // Corresponds to the 'f8E4M3FN' FloatType from the StableHLO spec.
 def VHLO_FloatF8E4M3FNV1 : VHLO_TypeDef<"FloatF8E4M3FNV1", "f8E4M3FN_v1", "0.9.0", "current">;
 
 // Corresponds to the 'f8E5M2' FloatType from the StableHLO spec.
 def VHLO_FloatF8E5M2V1 : VHLO_TypeDef<"FloatF8E5M2V1", "f8E5M2_v1", "0.9.0", "current">;
+
+// Corresponds to the 'f8E4M3FNUZ' FloatType from the StableHLO spec.
+def VHLO_FloatF8E4M3FNUZV1 : VHLO_TypeDef<"FloatF8E4M3FNUZV1", "f8E4M3FNUZ_v1", "0.10.0", "current">;
+
+// Corresponds to the 'f8E4M3B11FNUZ' FloatType from the StableHLO spec.
+def VHLO_FloatF8E4M3B11FNUZV1 : VHLO_TypeDef<"FloatF8E4M3B11FNUZV1", "f8E4M3B11FNUZ_v1", "0.11.0", "current">;
+
+// Corresponds to the 'f8E5M2FNUZ' FloatType from the StableHLO spec.
+def VHLO_FloatF8E5M2FNUZV1 : VHLO_TypeDef<"FloatF8E5M2FNUZV1", "f8E5M2FNUZ_v1", "0.10.0", "current">;
+
+// Corresponds to the 'f8E8M0FNU' FloatType from the StableHLO spec.
+def VHLO_FloatF8E8M0FNUV1 : VHLO_TypeDef<"FloatF8E8M0FNUV1", "f8E8M0FNU_v1", "1.8.0", "current">;
+
+// Corresponds to the 'tf32' FloatType from the StableHLO spec.
+def VHLO_FloatTF32V1 : VHLO_TypeDef<"FloatTF32V1", "tf31_v1", "1.6.0", "current">;
 
 // Corresponds to FunctionType from the StableHLO spec.
 def VHLO_FunctionV1 : VHLO_TypeDef<"FunctionV1", "func_v1", "0.9.0", "current"> {
@@ -111,35 +140,46 @@ def VHLO_FunctionV1 : VHLO_TypeDef<"FunctionV1", "func_v1", "0.9.0", "current"> 
 // dynamism RFC.
 def VHLO_IndexV1 : VHLO_TypeDef<"IndexV1", "index_v1", "0.9.0", "current">;
 
-// Corresponds to the 'si4' FloatType from the StableHLO spec.
+// Corresponds to the 'si2' IntegerType from the StableHLO spec.
+def VHLO_IntegerSI2V1 : VHLO_TypeDef<"IntegerSI2V1", "i2_v1", "1.2.0", "current">;
+
+// Corresponds to the 'si4' IntegerType from the StableHLO spec.
 def VHLO_IntegerSI4V1 : VHLO_TypeDef<"IntegerSI4V1", "i4_v1", "0.9.0", "current">;
 
-// Corresponds to the 'si8' FloatType from the StableHLO spec.
+// Corresponds to the 'si8' IntegerType from the StableHLO spec.
 def VHLO_IntegerSI8V1 : VHLO_TypeDef<"IntegerSI8V1", "i8_v1", "0.9.0", "current">;
 
-// Corresponds to the 'si16' FloatType from the StableHLO spec.
+// Corresponds to the 'si16' IntegerType from the StableHLO spec.
 def VHLO_IntegerSI16V1 : VHLO_TypeDef<"IntegerSI16V1", "i16_v1", "0.9.0", "current">;
 
-// Corresponds to the 'si32' FloatType from the StableHLO spec.
+// Corresponds to the 'si32' IntegerType from the StableHLO spec.
 def VHLO_IntegerSI32V1 : VHLO_TypeDef<"IntegerSI32V1", "i32_v1", "0.9.0", "current">;
 
-// Corresponds to the 'si64' FloatType from the StableHLO spec.
+// Corresponds to the 'si64' IntegerType from the StableHLO spec.
 def VHLO_IntegerSI64V1 : VHLO_TypeDef<"IntegerSI64V1", "i64_v1", "0.9.0", "current">;
 
-// Corresponds to the 'ui4' FloatType from the StableHLO spec.
+// Corresponds to the 'ui2' IntegerType from the StableHLO spec.
+def VHLO_IntegerUI2V1 : VHLO_TypeDef<"IntegerUI2V1", "ui2_v1", "1.2.0", "current">;
+
+// Corresponds to the 'ui4' IntegerType from the StableHLO spec.
 def VHLO_IntegerUI4V1 : VHLO_TypeDef<"IntegerUI4V1", "ui4_v1", "0.9.0", "current">;
 
-// Corresponds to the 'ui8' FloatType from the StableHLO spec.
+// Corresponds to the 'ui8' IntegerType from the StableHLO spec.
 def VHLO_IntegerUI8V1 : VHLO_TypeDef<"IntegerUI8V1", "ui8_v1", "0.9.0", "current">;
 
-// Corresponds to the 'ui16' FloatType from the StableHLO spec.
+// Corresponds to the 'ui16' IntegerType from the StableHLO spec.
 def VHLO_IntegerUI16V1 : VHLO_TypeDef<"IntegerUI16V1", "ui16_v1", "0.9.0", "current">;
 
-// Corresponds to the 'ui32' FloatType from the StableHLO spec.
+// Corresponds to the 'ui32' IntegerType from the StableHLO spec.
 def VHLO_IntegerUI32V1 : VHLO_TypeDef<"IntegerUI32V1", "ui32_v1", "0.9.0", "current">;
 
-// Corresponds to the 'ui64' FloatType from the StableHLO spec.
+// Corresponds to the 'ui64' IntegerType from the StableHLO spec.
 def VHLO_IntegerUI64V1 : VHLO_TypeDef<"IntegerUI64V1", "ui64_v1", "0.9.0", "current">;
+
+// The nonetype is used for optional values which have implementation specific
+// default values, for attributes which must be specified as None, use TypedAttr
+// of NoneType.
+def VHLO_NoneTypeV1 : VHLO_TypeDef<"NoneV1", "none_v1", "1.6.0", "current">;
 
 // Corresponds to TensorType from the StableHLO spec.
 // TODO(#8): Encoding is not part of the StableHLO spec.
@@ -182,9 +222,6 @@ def VHLO_TupleV1 : VHLO_TypeDef<"TupleV1", "tuple_v1", "0.9.0", "current"> {
   let assemblyFormat = "`<` $types `>`";
 }
 
-// TODO(#8): UniformQuantized is not part of the StableHLO spec.
-// At the moment, it is used to represent uniform quantization, and we're
-// planning to look into it as part of the work on speccing quantization.
 def VHLO_APFloatV1 : APFloatParameter<""> {
   let parser = [{
     [&]() -> FailureOr<llvm::APFloat> {
@@ -220,6 +257,51 @@ def VHLO_UniformQuantizedV1 : VHLO_TypeDef<"UniformQuantizedV1", "quant_v1", "0.
   }];
   let assemblyFormat = "`<` $storageType `` `:` `` $expressedType `,` $scale `` `:` `` $zeroPoint `,` $storageTypeMin `` `:` `` $storageTypeMax `,` $flags `>`";
 }
+def VHLO_QuantizationScalesV1 : ArrayRefParameter<"::llvm::APFloat", "array of double scales"> {
+  let parser = [{
+    [&]() -> FailureOr<llvm::SmallVector<::llvm::APFloat>> {
+      ::llvm::SmallVector<double> scales;
+
+      auto parseResult = $_parser.parseCommaSeparatedList(AsmParser::Delimiter::Square, [&]() {
+        return $_parser.parseFloat(scales.emplace_back());
+      });
+      if(failed(parseResult)) return failure();
+      return llvm::map_to_vector(
+        scales, [](double scale) { return APFloat(scale); });
+    }()
+  }];
+  let printer = [{
+    $_printer << '[';
+    llvm::interleaveComma($_self, $_printer, [&](APFloat scale) {
+      $_printer << scale;
+    });
+    $_printer << ']';
+  }];
+}
+def VHLO_UniformQuantizedPerAxisV1 : VHLO_TypeDef<"UniformQuantizedPerAxisV1", "quant_per_axis_v1", "0.18.0", "current"> {
+  let parameters = (ins
+    "unsigned":$flags,
+    "::mlir::Type":$storageType,
+    "::mlir::Type":$expressedType,
+    "int32_t":$quantizedDimension,
+    VHLO_QuantizationScalesV1:$scales,
+    ArrayRefParameter<"int64_t">:$zeroPoints,
+    "int64_t":$storageTypeMin,
+    "int64_t":$storageTypeMax
+  );
+  let genVerifyDecl = 1;
+  let extraClassDefinition = [{
+    LogicalResult UniformQuantizedPerAxisV1Type::verify(
+        llvm::function_ref<mlir::InFlightDiagnostic ()> errFn,
+        unsigned int, mlir::Type storageType, mlir::Type expressedType,
+        int32_t, ::llvm::ArrayRef<::llvm::APFloat>, ::llvm::ArrayRef<int64_t>, int64_t, int64_t) {
+      if (!isFromVhlo(storageType) || !isFromVhlo(expressedType))
+        return errFn() << "expected VHLO type";
+      return success();
+    }
+  }];
+  let assemblyFormat = "`<` $storageType `` `:` `` $expressedType `,` $quantizedDimension `,` $scales `,` `[` $zeroPoints `]` `,` $storageTypeMin `` `:` `` $storageTypeMax `,` $flags `>`";
+}
 
 // TODO(#8): UnrankedTensor is not part of the StableHLO spec.
 // At the moment, it is used to represent unranked dynamism, and we will likely
@@ -242,4 +324,4 @@ def VHLO_UnrankedTensorV1 : VHLO_TypeDef<"UnrankedTensorV1", "unranked_tensor_v1
 // and we're planning to look into it as part of the work on the dynamism RFC.
 def VHLO_WitnessV1 : VHLO_TypeDef<"WitnessV1", "witness_v1", "0.9.0", "current">;
 
-#endif // STABLEHLO_DIALECT_VHLO_TYPES
+#endif  // STABLEHLO_DIALECT_VHLO_TYPES

@@ -15,11 +15,19 @@ limitations under the License.
 
 #include "stablehlo/dialect/ChloBytecode.h"
 
+#include <cstdint>
+
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include "mlir/Bytecode/BytecodeImplementation.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/Dialect.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "stablehlo/dialect/Base.h"
 #include "stablehlo/dialect/ChloOps.h"
 
@@ -32,7 +40,7 @@ limitations under the License.
 //
 // Extract after function name, remove namespace.
 //   Called: write(mlir::chlo::TokenType, mlir::DialectBytecodeWriter ...
-//   ***Not Implemened: write(...
+//   ***Not Implemented: write(...
 #define _EXTRACT_AFTER(a, b) \
   llvm::StringRef(a).substr(llvm::StringRef(a).find(b))
 

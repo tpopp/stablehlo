@@ -13,15 +13,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "Scope.h"
+#include "stablehlo/reference/Scope.h"
 
+#include <cassert>
+
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Support/DebugStringHelper.h"
+#include "mlir/Support/LLVM.h"
+#include "stablehlo/reference/Tensor.h"
+#include "stablehlo/reference/Token.h"
+#include "stablehlo/reference/Value.h"
 
 namespace mlir {
 namespace stablehlo {
 
-void Scope::add(Value ssaValue, Tensor runtimeValue) {
+void Scope::add(Value ssaValue, InterpreterValue runtimeValue) {
   // We are instantiating a new `Scope` object every time the
   // interpreter evaluates a region. With that, the `stack_frame_` should not
   // have any duplicates.
@@ -35,13 +46,38 @@ void Scope::add(Value ssaValue, Tensor runtimeValue) {
   stack_frame_[ssaValue] = runtimeValue;
 }
 
+void Scope::add(Value ssaValue, Tensor runtimeValue) {
+  add(ssaValue, InterpreterValue(runtimeValue));
+}
+
+void Scope::add(Value ssaValue, Token runtimeValue) {
+  add(ssaValue, InterpreterValue(runtimeValue));
+}
+
+void Scope::add(Value ssaValue, Tuple runtimeValue) {
+  add(ssaValue, InterpreterValue(runtimeValue));
+}
+
+void Scope::add(ValueRange ssaValues,
+                ArrayRef<InterpreterValue> runtimeValues) {
+  assert(ssaValues.size() == runtimeValues.size());
+  for (auto [ssaValue, runtimeValue] : llvm::zip(ssaValues, runtimeValues))
+    add(ssaValue, runtimeValue);
+}
+
 void Scope::add(ValueRange ssaValues, ArrayRef<Tensor> runtimeValues) {
   assert(ssaValues.size() == runtimeValues.size());
   for (auto [ssaValue, runtimeValue] : llvm::zip(ssaValues, runtimeValues))
     add(ssaValue, runtimeValue);
 }
 
-Tensor Scope::find(Value ssaValue) const {
+void Scope::add(ValueRange ssaValues, ArrayRef<Token> runtimeValues) {
+  assert(ssaValues.size() == runtimeValues.size());
+  for (auto [ssaValue, runtimeValue] : llvm::zip(ssaValues, runtimeValues))
+    add(ssaValue, runtimeValue);
+}
+
+InterpreterValue Scope::find(Value ssaValue) const {
   auto it = stack_frame_.find(ssaValue);
 
   if (it != stack_frame_.end()) return it->second;
@@ -53,9 +89,31 @@ Tensor Scope::find(Value ssaValue) const {
   return parent_->find(ssaValue);
 }
 
-SmallVector<Tensor> Scope::find(ValueRange ssaValues) const {
-  return llvm::to_vector(
-      llvm::map_range(ssaValues, [&](Value value) { return find(value); }));
+SmallVector<InterpreterValue> Scope::find(ValueRange ssaValues) const {
+  return llvm::map_to_vector(ssaValues,
+                             [&](Value value) { return find(value); });
+}
+
+Tensor Scope::findTensor(Value ssaValue) const {
+  return find(ssaValue).getTensor();
+}
+
+SmallVector<Tensor> Scope::findTensors(ValueRange ssaValues) const {
+  return llvm::map_to_vector(
+      ssaValues, [&](Value value) { return find(value).getTensor(); });
+}
+
+Token Scope::findToken(Value ssaValue) const {
+  return find(ssaValue).getToken();
+}
+
+SmallVector<Token> Scope::findTokens(ValueRange ssaValues) const {
+  return llvm::map_to_vector(
+      ssaValues, [&](Value value) { return find(value).getToken(); });
+}
+
+Tuple Scope::findTuple(Value ssaValue) const {
+  return find(ssaValue).getTuple();
 }
 
 }  // namespace stablehlo
