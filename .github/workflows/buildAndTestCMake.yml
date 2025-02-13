@@ -17,13 +17,11 @@ name: CMake Build
 on:
   pull_request:
     branches: [ main ]
-    paths-ignore: ['**.md', 'docs/**']
   push:
     branches: [ main ]
-    paths-ignore: ['**.md', 'docs/**']
   schedule:
-    # Run once a day
-    - cron:  '0 12 * * *'
+    # Run once every 6hr building against llvm-project@HEAD
+    - cron:  '0 */6 * * *'
   workflow_dispatch:
 
 # Ensure that only a single job or workflow using the same
@@ -36,6 +34,9 @@ concurrency:
 
 jobs:
   cmake-build:
+    # Only run scheduled CI on main repo
+    if: (github.repository == 'openxla/stablehlo' || github.event_name != 'schedule')
+    name: "cmake-build ${{ github.event_name == 'schedule' && '(llvm-project@HEAD)' || ''}}"
     env:
       LLVM_PROJECT_DIR: "llvm-project"
       LLVM_BUILD_DIR: "llvm-build"
@@ -47,13 +48,18 @@ jobs:
 
     steps:
     - name: Checkout StableHLO
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Get LLVM Version
       id: llvm-version
       shell: bash
       run: |
-        echo "version=$(cat ${{ github.workspace }}/build_tools/llvm_version.txt)" >> $GITHUB_OUTPUT
+        USE_LLVM_HEAD=${{ github.event_name == 'schedule' }}
+        if [[ $USE_LLVM_HEAD = true ]]; then
+          echo "version=main" >> $GITHUB_OUTPUT
+        else
+          echo "version=$(cat ${{ github.workspace }}/build_tools/llvm_version.txt)" >> $GITHUB_OUTPUT
+        fi;
 
     - name: Setup workspace
       uses: ./.github/actions/setup-build
@@ -63,14 +69,29 @@ jobs:
     - name: Configure and Build LLVM
       shell: bash
       run: |
-        ./build_tools/github_actions/ci_build_llvm.sh "$LLVM_PROJECT_DIR" "$LLVM_BUILD_DIR"
+        ./build_tools/github_actions/ci_build_cmake_llvm.sh "$LLVM_PROJECT_DIR" "$LLVM_BUILD_DIR"
+      env:
+          CMAKE_BUILD_TYPE: Release
+          MLIR_ENABLE_BINDINGS_PYTHON: ON
 
-    - name: Build and Test StableHLO
+    - name: Build and Test StableHLO (with AddressSanitizer)
       shell: bash
       run: |
-        ./build_tools/github_actions/ci_build_stablehlo.sh "$LLVM_BUILD_DIR" "$STABLEHLO_BUILD_DIR"
+        ./build_tools/github_actions/ci_build_cmake.sh "$LLVM_BUILD_DIR" "$STABLEHLO_BUILD_DIR"
+      env:
+          CMAKE_BUILD_TYPE: Release
+          STABLEHLO_ENABLE_BINDINGS_PYTHON: OFF
+          STABLEHLO_ENABLE_SANITIZER: address
+          # TODO: remove this once https://github.com/openxla/stablehlo/pull/2318 is fixed
+          ASAN_OPTIONS: allow_user_poisoning=false
 
-    - name: Build and Test StableHLO Python API
+    - name: Build and Test StableHLO (with Python bindings)
       shell: bash
       run: |
-        ./build_tools/github_actions/ci_build_stablehlo_python_api.sh "$LLVM_PROJECT_DIR" "$STABLEHLO_PYTHON_BUILD_DIR" "$GITHUB_WORKSPACE"
+        pip install tensorflow-cpu nanobind==2.4
+        pip install -r "$LLVM_PROJECT_DIR/mlir/python/requirements.txt"
+        ./build_tools/github_actions/ci_build_cmake.sh "$LLVM_BUILD_DIR" "$STABLEHLO_BUILD_DIR"
+      env:
+          CMAKE_BUILD_TYPE: Release
+          STABLEHLO_ENABLE_BINDINGS_PYTHON: ON
+          STABLEHLO_ENABLE_PYTHON_TF_TESTS: ON

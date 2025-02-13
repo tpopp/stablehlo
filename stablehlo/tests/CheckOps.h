@@ -16,7 +16,8 @@ limitations under the License.
 #ifndef STABLEHLO_DIALECT_CHECKOPS_H_
 #define STABLEHLO_DIALECT_CHECKOPS_H_
 
-#include "mlir/Dialect/Quant/QuantTypes.h"
+#include "mlir/Bytecode/BytecodeOpInterface.h"
+#include "mlir/Dialect/Quant/IR/QuantTypes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
@@ -24,7 +25,6 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "stablehlo/reference/Tensor.h"
-#include "stablehlo/tests/CheckOps.h"
 
 namespace mlir {
 namespace stablehlo {
@@ -37,8 +37,17 @@ class CheckDialect : public Dialect {
 };
 
 // The eval functions for the following ops are used only for test harness.
-llvm::Error evalAlmostEqOp(const Tensor &lhs, ElementsAttr value);
-llvm::Error evalEqOp(const Tensor &lhs, ElementsAttr value);
+llvm::Error evalExpectAlmostEqConstOp(const Tensor &lhs, ElementsAttr value,
+                                      APFloat tolerance);
+llvm::Error evalExpectAlmostEqOp(const Tensor &lhs, const Tensor &rhs,
+                                 APFloat tolerance);
+llvm::Error evalExpectEqConstOp(const Tensor &lhs, ElementsAttr value);
+llvm::Error evalExpectEqOp(const Tensor &lhs, const Tensor &rhs);
+llvm::Error evalExpectSerializedEqOp(const Tensor &expected, StringRef probeId,
+                                     StringRef probeDir, uint32_t iteration);
+llvm::Error evalExpectCloseOp(const Tensor &actual, const Tensor &expected,
+                              uint64_t min_ulp_difference,
+                              uint64_t max_ulp_difference);
 
 }  // namespace check
 }  // namespace stablehlo

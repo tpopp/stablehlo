@@ -16,6 +16,8 @@ limitations under the License.
 
 #include "stablehlo/dialect/ChloOps.h"
 
+#include <cassert>
+#include <cstdint>
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
@@ -23,11 +25,28 @@ limitations under the License.
 #include "llvm/ADT/TypeSwitch.h"
 #include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/Traits.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributeInterfaces.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
-#include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Dialect.h"
+#include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/OperationSupport.h"
+#include "mlir/IR/Region.h"
+#include "mlir/Interfaces/InferTypeOpInterface.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
+#include "mlir/Support/TypeID.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "stablehlo/dialect/AssemblyFormat.h"
+#include "stablehlo/dialect/Base.h"
 #include "stablehlo/dialect/BroadcastUtils.h"
 #include "stablehlo/dialect/ChloBytecode.h"
+#include "stablehlo/dialect/TypeInference.h"
 
 // Include order matters
 #include "stablehlo/dialect/ChloEnums.cpp.inc"
@@ -43,17 +62,18 @@ namespace chlo {
 
 // TODO(b/231358795): Review the use of InferTypeOpInterface for ops that
 // support quantization or sparsity.
-#define INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(Op)                        \
-  LogicalResult Op::inferReturnTypeComponents(                                \
-      MLIRContext* context, std::optional<Location> location,                 \
-      ValueShapeRange operands, DictionaryAttr attributes,                    \
-      RegionRange regions,                                                    \
-      SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {          \
-    return inferReturnTypeComponentsFromOperands(context, location, operands, \
-                                                 attributes, regions,         \
-                                                 inferredReturnShapes);       \
+#define INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(Op)                \
+  LogicalResult Op::inferReturnTypeComponents(                        \
+      MLIRContext* context, std::optional<Location> location,         \
+      ValueShapeRange operands, DictionaryAttr attributes,            \
+      OpaqueProperties properties, RegionRange regions,               \
+      SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {  \
+    return inferReturnTypeComponentsFromOperands(                     \
+        context, location, operands, attributes, properties, regions, \
+        inferredReturnShapes);                                        \
   }
 
+INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(AsinAcosKernelOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(AcosOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(AcoshOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(AsinOp)
@@ -71,6 +91,7 @@ INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(LgammaOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(NextAfterOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(PolygammaOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(SinhOp)
+INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(SquareOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(TanOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(ZetaOp)
 
@@ -82,16 +103,16 @@ namespace {
 // Gets the resulting type from a broadcast between two types.
 ShapedTypeComponents getBroadcastType(
     Type x, Type y, Type elementType,
-    DenseIntElementsAttr broadcastDimensionsAttr) {
-  auto xRanked = x.dyn_cast<RankedTensorType>();
-  auto yRanked = y.dyn_cast<RankedTensorType>();
+    std::optional<ArrayRef<int64_t>> broadcastDimensionsAttr) {
+  auto xRanked = dyn_cast<RankedTensorType>(x);
+  auto yRanked = dyn_cast<RankedTensorType>(y);
   if (!xRanked || !yRanked) return {elementType};
 
   auto shapeX = xRanked.getShape();
   auto shapeY = yRanked.getShape();
 
   // If no broadcast dimensions, assume "numpy" broadcasting.
-  if (shapeX.size() == shapeY.size() || !broadcastDimensionsAttr) {
+  if (shapeX.size() == shapeY.size() || !broadcastDimensionsAttr.has_value()) {
     llvm::SmallVector<int64_t, 4> outShape;
     if (!mlir::OpTrait::util::getBroadcastedShape(shapeX, shapeY, outShape)) {
       // Signal illegal broadcast_dimensions as unranked.
@@ -103,7 +124,7 @@ ShapedTypeComponents getBroadcastType(
   auto shapeLarge = shapeX.size() > shapeY.size() ? shapeX : shapeY;
   auto shapeSmall = shapeX.size() <= shapeY.size() ? shapeX : shapeY;
 
-  auto broadcastDimensions = broadcastDimensionsAttr.getValues<APInt>();
+  auto broadcastDimensions = broadcastDimensionsAttr.value();
   if (broadcastDimensions.size() != shapeSmall.size()) {
     // Signal illegal broadcast_dimensions as unranked.
     return {elementType};
@@ -111,8 +132,8 @@ ShapedTypeComponents getBroadcastType(
   llvm::SmallVector<int64_t, 4> shapeLargeFiltered;
   shapeLargeFiltered.reserve(shapeSmall.size());
   for (const auto& dim : broadcastDimensions) {
-    if (dim.getZExtValue() >= shapeLarge.size()) return {elementType};
-    shapeLargeFiltered.push_back(shapeLarge[dim.getZExtValue()]);
+    if (dim >= static_cast<int64_t>(shapeLarge.size())) return {elementType};
+    shapeLargeFiltered.push_back(shapeLarge[dim]);
   }
   llvm::SmallVector<int64_t, 4> outShapeFiltered;
   if (!mlir::OpTrait::util::getBroadcastedShape(shapeSmall, shapeLargeFiltered,
@@ -124,7 +145,7 @@ ShapedTypeComponents getBroadcastType(
   llvm::SmallVector<int64_t, 4> outShape(shapeLarge.begin(), shapeLarge.end());
   for (const auto& indexPair : llvm::enumerate(broadcastDimensions)) {
     auto newValue = outShapeFiltered[indexPair.index()];
-    outShape[indexPair.value().getZExtValue()] = newValue;
+    outShape[indexPair.value()] = newValue;
   }
 
   return {outShape, elementType};
@@ -132,17 +153,14 @@ ShapedTypeComponents getBroadcastType(
 
 LogicalResult InferBroadcastBinaryOpReturnTypeComponents(
     MLIRContext* context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, Type elementType,
+    DictionaryAttr attributes, OpaqueProperties properties,
+    std::optional<ArrayRef<int64_t>> broadcastDimensions, Type elementType,
     SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
-  // Find broadcast_dimensions.
-  DenseIntElementsAttr broadcastDimensions =
-      attributes.get("broadcast_dimensions")
-          .dyn_cast_or_null<DenseIntElementsAttr>();
-
-  ShapedType lhsType = operands[0].getType().dyn_cast<ShapedType>();
-  ShapedType rhsType = operands[1].getType().dyn_cast<ShapedType>();
+  ShapedType lhsType = cast<ShapedType>(operands[0].getType());
+  ShapedType rhsType = cast<ShapedType>(operands[1].getType());
   if (!lhsType || !rhsType ||
-      lhsType.getElementType() != rhsType.getElementType())
+      !hlo::isCompatibleElementTypeForHloTypeInference(
+          lhsType.getElementType(), rhsType.getElementType()))
     return emitOptionalError(location, "mismatched operand types");
   if (!elementType) elementType = lhsType.getElementType();
   inferredReturnShapes.push_back(
@@ -152,6 +170,7 @@ LogicalResult InferBroadcastBinaryOpReturnTypeComponents(
 
 LogicalResult ReifyBroadcastBinaryOpReturnTypeShapes(
     OpBuilder& builder, Operation* op, ValueRange operands,
+    std::optional<ArrayRef<int64_t>> broadcastDimensions,
     SmallVectorImpl<Value>& result) {
   assert(operands.size() == 2 && "expect binary op");
   auto loc = op->getLoc();
@@ -159,10 +178,9 @@ LogicalResult ReifyBroadcastBinaryOpReturnTypeShapes(
   auto rhs = operands[1];
 
   // Check for "numpy"-style rank broadcast.
-  auto broadcastDimensions = op->getAttr("broadcast_dimensions")
-                                 .dyn_cast_or_null<DenseIntElementsAttr>();
-  if (broadcastDimensions &&
-      !hlo::isLegalNumpyRankedBroadcast(lhs, rhs, broadcastDimensions)) {
+  auto broadcastDimensionsAttr = op->getAttr("broadcast_dimensions");
+  if (broadcastDimensions && !hlo::isLegalNumpyRankedBroadcast(
+                                 lhs, rhs, broadcastDimensions.value())) {
     // Note: It is unclear whether the general specification of explicit
     // broadcast_dimensions on binary ops is a feature we want to carry
     // forward. While it can technically be implemented for ranked-dynamic,
@@ -172,7 +190,7 @@ LogicalResult ReifyBroadcastBinaryOpReturnTypeShapes(
     // of numpy-like prefix-padding.
     return op->emitWarning()
            << "unsupported non prefix-padded dynamic rank "
-           << "broadcast_dimensions = " << broadcastDimensions;
+           << "broadcast_dimensions = " << broadcastDimensionsAttr;
   }
 
   result.push_back(hlo::computeBinaryElementwiseBroadcastingResultExtents(
@@ -188,20 +206,21 @@ LogicalResult ReifyBroadcastBinaryOpReturnTypeShapes(
 LogicalResult BroadcastComplexOp::inferReturnTypeComponents(
     MLIRContext* context, std::optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes,
-    RegionRange /*regions*/,
-    SmallVectorImpl<ShapedTypeComponents>& inferedReturnShapes) {
-  ShapedType lhsType = operands[0].getType().dyn_cast<ShapedType>();
-  if (!lhsType) return emitOptionalError(location, "expected ShapedType");
+    OpaqueProperties properties, RegionRange regions,
+    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
+  ShapedType lhsType = cast<ShapedType>(operands[0].getType());
   Type elementType = ComplexType::get(lhsType.getElementType());
-  return InferBroadcastBinaryOpReturnTypeComponents(context, location, operands,
-                                                    attributes, elementType,
-                                                    inferedReturnShapes);
+  Adaptor adaptor(operands, attributes, properties, regions);
+  return InferBroadcastBinaryOpReturnTypeComponents(
+      context, location, operands, attributes, properties,
+      adaptor.getBroadcastDimensions(), elementType, inferredReturnShapes);
 }
 LogicalResult BroadcastComplexOp::reifyReturnTypeShapes(
     OpBuilder& builder, ValueRange operands,
     SmallVectorImpl<Value>& reifiedReturnShapes) {
-  return ReifyBroadcastBinaryOpReturnTypeShapes(builder, getOperation(),
-                                                operands, reifiedReturnShapes);
+  return ReifyBroadcastBinaryOpReturnTypeShapes(
+      builder, getOperation(), operands, getBroadcastDimensions(),
+      reifiedReturnShapes);
 }
 
 //===----------------------------------------------------------------------===//
@@ -210,7 +229,7 @@ LogicalResult BroadcastComplexOp::reifyReturnTypeShapes(
 
 void BroadcastCompareOp::build(OpBuilder& builder, OperationState& result,
                                Value lhs, Value rhs,
-                               DenseIntElementsAttr broadcastDimensions,
+                               DenseI64ArrayAttr broadcastDimensions,
                                chlo::ComparisonDirection comparisonDirection,
                                chlo::ComparisonType compareType) {
   build(builder, result, lhs, rhs, broadcastDimensions,
@@ -222,19 +241,21 @@ void BroadcastCompareOp::build(OpBuilder& builder, OperationState& result,
 LogicalResult BroadcastCompareOp::inferReturnTypeComponents(
     MLIRContext* context, std::optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes,
-    RegionRange /*regions*/,
-    SmallVectorImpl<ShapedTypeComponents>& inferedReturnShapes) {
+    OpaqueProperties properties, RegionRange regions,
+    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
   Type elementType = IntegerType::get(context, 1);
-  return InferBroadcastBinaryOpReturnTypeComponents(context, location, operands,
-                                                    attributes, elementType,
-                                                    inferedReturnShapes);
+  Adaptor adaptor(operands, attributes, properties, regions);
+  return InferBroadcastBinaryOpReturnTypeComponents(
+      context, location, operands, attributes, properties,
+      adaptor.getBroadcastDimensions(), elementType, inferredReturnShapes);
 }
 
 LogicalResult BroadcastCompareOp::reifyReturnTypeShapes(
     OpBuilder& builder, ValueRange operands,
     SmallVectorImpl<Value>& reifiedReturnShapes) {
-  return ReifyBroadcastBinaryOpReturnTypeShapes(builder, getOperation(),
-                                                operands, reifiedReturnShapes);
+  return ReifyBroadcastBinaryOpReturnTypeShapes(
+      builder, getOperation(), operands, getBroadcastDimensions(),
+      reifiedReturnShapes);
 }
 
 //===----------------------------------------------------------------------===//
@@ -243,13 +264,14 @@ LogicalResult BroadcastCompareOp::reifyReturnTypeShapes(
 
 static Type getIsInfLikeReturnType(Value operand) {
   Builder b(operand.getContext());
-  return hlo::getSameShapeTensorType(operand.getType().cast<TensorType>(),
+  return hlo::getSameShapeTensorType(cast<ShapedType>(operand.getType()),
                                      b.getI1Type());
 }
 
 LogicalResult IsInfOp::inferReturnTypes(
     MLIRContext* /*ctx*/, std::optional<Location>, ValueRange operands,
-    DictionaryAttr, RegionRange, SmallVectorImpl<Type>& inferredReturnTypes) {
+    DictionaryAttr, OpaqueProperties, RegionRange,
+    SmallVectorImpl<Type>& inferredReturnTypes) {
   inferredReturnTypes.push_back(getIsInfLikeReturnType(operands.front()));
   return success();
 }
@@ -260,7 +282,8 @@ LogicalResult IsInfOp::inferReturnTypes(
 
 LogicalResult IsNegInfOp::inferReturnTypes(
     MLIRContext* /*ctx*/, std::optional<Location>, ValueRange operands,
-    DictionaryAttr, RegionRange, SmallVectorImpl<Type>& inferredReturnTypes) {
+    DictionaryAttr, OpaqueProperties, RegionRange,
+    SmallVectorImpl<Type>& inferredReturnTypes) {
   inferredReturnTypes.push_back(getIsInfLikeReturnType(operands.front()));
   return success();
 }
@@ -271,7 +294,8 @@ LogicalResult IsNegInfOp::inferReturnTypes(
 
 LogicalResult IsPosInfOp::inferReturnTypes(
     MLIRContext* /*ctx*/, std::optional<Location>, ValueRange operands,
-    DictionaryAttr, RegionRange, SmallVectorImpl<Type>& inferredReturnTypes) {
+    DictionaryAttr, OpaqueProperties, RegionRange,
+    SmallVectorImpl<Type>& inferredReturnTypes) {
   inferredReturnTypes.push_back(getIsInfLikeReturnType(operands.front()));
   return success();
 }
@@ -280,21 +304,24 @@ LogicalResult IsPosInfOp::inferReturnTypes(
 // Macros for method definitions that are common to most broadcasting ops.
 //===----------------------------------------------------------------------===//
 
-#define BROADCAST_BINARY_OP_DEFS(Op)                                       \
-  LogicalResult Op::inferReturnTypeComponents(                             \
-      MLIRContext* context, std::optional<Location> location,              \
-      ValueShapeRange operands, DictionaryAttr attributes,                 \
-      RegionRange regions,                                                 \
-      SmallVectorImpl<ShapedTypeComponents>& inferedReturnShapes) {        \
-    return InferBroadcastBinaryOpReturnTypeComponents(                     \
-        context, location, operands, attributes, /*element_type=*/nullptr, \
-        inferedReturnShapes);                                              \
-  }                                                                        \
-  LogicalResult Op::reifyReturnTypeShapes(                                 \
-      OpBuilder& builder, ValueRange operands,                             \
-      SmallVectorImpl<Value>& reifiedReturnShapes) {                       \
-    return ReifyBroadcastBinaryOpReturnTypeShapes(                         \
-        builder, getOperation(), operands, reifiedReturnShapes);           \
+#define BROADCAST_BINARY_OP_DEFS(Op)                                        \
+  LogicalResult Op::inferReturnTypeComponents(                              \
+      MLIRContext* context, std::optional<Location> location,               \
+      ValueShapeRange operands, DictionaryAttr attributes,                  \
+      OpaqueProperties properties, RegionRange regions,                     \
+      SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {        \
+    Adaptor adaptor(operands.getValues(), attributes, properties, regions); \
+    return InferBroadcastBinaryOpReturnTypeComponents(                      \
+        context, location, operands, attributes, properties,                \
+        adaptor.getBroadcastDimensions(), /*element_type=*/nullptr,         \
+        inferredReturnShapes);                                              \
+  }                                                                         \
+  LogicalResult Op::reifyReturnTypeShapes(                                  \
+      OpBuilder& builder, ValueRange operands,                              \
+      SmallVectorImpl<Value>& reifiedReturnShapes) {                        \
+    return ReifyBroadcastBinaryOpReturnTypeShapes(                          \
+        builder, getOperation(), operands, getBroadcastDimensions(),        \
+        reifiedReturnShapes);                                               \
   }
 
 BROADCAST_BINARY_OP_DEFS(BroadcastAddOp)
@@ -319,42 +346,25 @@ BROADCAST_BINARY_OP_DEFS(BroadcastZetaOp)
 #undef BROADCAST_BINARY_OP_DEFS
 
 LogicalResult ConstantLikeOp::verify() {
-  if (getValue().getType() != getType().cast<ShapedType>().getElementType())
+  if (getValue().getType() != getType().getElementType())
     return emitOpError() << "value's type doesn't match element return type";
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
-// MinimumBroadcastShapesOp
-//===----------------------------------------------------------------------===//
-LogicalResult MinimumBroadcastShapesOp::verify() {
-  // Check that the number of operands matches the number of outputs.
-  unsigned resultShapesCount = getResults().size();
-  unsigned operandShapesCount = getShapes().size();
-  if (operandShapesCount != resultShapesCount)
-    return emitOpError() << "number of operand shapes (" << operandShapesCount
-                         << ") does not match number of result shapes ("
-                         << resultShapesCount << ")";
-  if (operandShapesCount < 2)
-    return emitOpError() << "number of operand shapes (" << operandShapesCount
-                         << ") should be >= 2";
   return success();
 }
 
 LogicalResult ConstantLikeOp::inferReturnTypeComponents(
     MLIRContext* /*context*/, std::optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes,
-    RegionRange /*regions*/,
-    SmallVectorImpl<ShapedTypeComponents>& inferedReturnShapes) {
-  ConstantLikeOp::Adaptor op(operands, attributes);
+    OpaqueProperties properties, RegionRange /*regions*/,
+    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
+  ConstantLikeOp::Adaptor op(operands, attributes, properties);
   if (failed(op.verify(location.value()))) return failure();
   Type elementType = op.getValue().getType();
   Type operandType = op.getOperand().getType();
-  if (operandType.isa<UnrankedTensorType>()) {
-    inferedReturnShapes.emplace_back(elementType);
+  if (isa<UnrankedTensorType>(operandType)) {
+    inferredReturnShapes.emplace_back(elementType);
   } else {
-    const auto& shape = operandType.cast<RankedTensorType>().getShape();
-    inferedReturnShapes.emplace_back(shape, elementType);
+    const auto& shape = cast<RankedTensorType>(operandType).getShape();
+    inferredReturnShapes.emplace_back(shape, elementType);
   }
   return success();
 }
@@ -367,36 +377,35 @@ LogicalResult ConstantLikeOp::reifyReturnTypeShapes(
 }
 
 OpFoldResult ConstantLikeOp::fold(FoldAdaptor /*adaptor*/) {
-  auto opType = getOperand().getType().cast<ShapedType>();
+  auto opType = getOperand().getType();
   if (!opType.hasStaticShape()) return {};
   auto type = RankedTensorType::get(opType.getShape(), getValue().getType());
-  if (auto complexAttr = getValue().dyn_cast<complex::NumberAttr>())
+  if (auto complexAttr = dyn_cast<complex::NumberAttr>(getValue()))
     return DenseElementsAttr::get(type, complexAttr.getValue());
   return DenseElementsAttr::get(type, getValue());
 }
 
 LogicalResult BroadcastSelectOp::inferReturnTypeComponents(
     MLIRContext*, std::optional<Location> location, ValueShapeRange operands,
-    DictionaryAttr, RegionRange,
+    DictionaryAttr, OpaqueProperties, RegionRange,
     SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
   BroadcastSelectOp::Adaptor op(operands.getValues());
-  auto predType = op.getPred().getType().dyn_cast<ShapedType>();
-  auto onTrueType = op.getOnTrue().getType().dyn_cast<ShapedType>();
-  auto onFalseType = op.getOnFalse().getType().dyn_cast<ShapedType>();
+  auto predType = cast<ShapedType>(op.getPred().getType());
+  auto onTrueType = cast<ShapedType>(op.getOnTrue().getType());
+  auto onFalseType = cast<ShapedType>(op.getOnFalse().getType());
 
-  if (!predType || !onTrueType || !onFalseType ||
-      onTrueType.getElementType() != onFalseType.getElementType())
+  if (onTrueType.getElementType() != onFalseType.getElementType())
     return emitOptionalError(location, "mismatched operand types");
 
   Type elementType = onTrueType.getElementType();
 
   // Compute the result shape as two binary broadcasts.
   ShapedTypeComponents& components = inferredReturnShapes.emplace_back(
-      getBroadcastType(onTrueType, onFalseType, elementType, nullptr));
+      getBroadcastType(onTrueType, onFalseType, elementType, std::nullopt));
   if (components.hasRank())
     components = getBroadcastType(
         RankedTensorType::get(components.getDims(), elementType), predType,
-        elementType, nullptr);
+        elementType, std::nullopt);
   return success();
 }
 
@@ -408,38 +417,238 @@ LogicalResult BroadcastSelectOp::reifyReturnTypeShapes(
 }
 
 //===----------------------------------------------------------------------===//
-// RankSpecializationClusterOp
+// RaggedDotOp
 //===----------------------------------------------------------------------===//
 
-void RankSpecializationClusterOp::getSuccessorRegions(
-    std::optional<unsigned> index, ArrayRef<Attribute> /*operands*/,
-    SmallVectorImpl<RegionSuccessor>& regions) {
-  // RankSpecializationClusterOp has unconditional control flows into the region
-  // and back to the parent, so return the correct RegionSuccessor purely based
-  // on the index being None or 0.
-  if (index.has_value()) {
-    regions.push_back(RegionSuccessor(getResults()));
-    return;
+namespace {
+
+// RaggedDot has three general modes, based on the kind of the ragged dimension.
+// Mode 1, where the ragged dimension is an lhs non-contracting dim (m).
+//   lhs : [b, m, k]
+//   rhs : [g, b, k, n]
+//   group_sizes : [g]
+//   result : [b, m, n]
+// Mode 2, where the ragged dimension is an lhs/rhs contracting dim (k).
+//   lhs : [b, m, k]
+//   rhs : [b, k, n]
+//   group_sizes : [g]
+//   result : [g, b, m, n]
+// Mode 3, where the ragged dimension is an lhs/rhs batch dim (b).
+//   lhs : [b, m, k]
+//   rhs : [b, k, n]
+//   group_sizes : [g]
+//   result : [b, m, n]
+// As with dot_general, the lhs and rhs can have arbitrary batching,
+// contracting and non-contracting dimensions.
+// Additionally:
+//   - In all modes, the lhs must have exactly one ragged dimension.
+//   - In mode 1, the rhs must have exactly one group dimension.
+LogicalResult checkRaggedDotConstraints(
+    std::optional<Location> location, RankedTensorType rankedLhsType,
+    RankedTensorType rankedRhsType, RankedTensorType rankedGroupSizesType,
+    ArrayRef<int64_t> lhsBatchingDimensions,
+    ArrayRef<int64_t> rhsBatchingDimensions,
+    ArrayRef<int64_t> lhsContractingDimensions,
+    ArrayRef<int64_t> rhsContractingDimensions,
+    ArrayRef<int64_t> lhsRaggedDimensions,
+    ArrayRef<int64_t> rhsGroupDimensions) {
+  // Check that the group sizes has rank=1.
+  if (rankedGroupSizesType.getRank() != 1) {
+    return emitOptionalError(
+        location, "expected rank of group_sizes of ragged dot to be 1, got ",
+        rankedGroupSizesType.getRank());
   }
-  regions.push_back(RegionSuccessor(&getBody()));
+  auto numGroups = rankedGroupSizesType.getDimSize(0);
+
+  // Check that there is exactly one lhs ragged dimension.
+  if (lhsRaggedDimensions.size() != 1) {
+    return emitOptionalError(
+        location, "There must be exactly one ragged dimension in the lhs.");
+  }
+  const int64_t lhsRaggedDim = lhsRaggedDimensions[0];
+
+  // Check that the lhs ragged dimension is in range.
+  if (failed(hlo::checkDimInBounds(location, lhsRaggedDim,
+                                   rankedLhsType.getRank(), "lhs_ragged_dim",
+                                   "lhs_rank"))) {
+    return failure();
+  }
+
+  // Validate basic properties of the rhs group dimension(s).
+  for (auto rhsGroupDim : rhsGroupDimensions) {
+    if (failed(hlo::checkDimInBounds(location, rhsGroupDim,
+                                     rankedRhsType.getRank(), "rhs_group_dim",
+                                     "rhs_rank"))) {
+      return failure();
+    }
+  }
+  if (failed(hlo::checkDimsDistinct(
+          location, rhsGroupDimensions, rhsBatchingDimensions,
+          "rhs_group_dimensions", "rhs_batching_dimensions")) ||
+      failed(hlo::checkDimsDistinct(
+          location, rhsGroupDimensions, rhsContractingDimensions,
+          "rhs_group_dimensions", "rhs_contracting_dimensions"))) {
+    return failure();
+  }
+
+  if (llvm::is_contained(lhsBatchingDimensions, lhsRaggedDim) ||
+      llvm::is_contained(lhsContractingDimensions, lhsRaggedDim)) {
+    // Ragged batch (b):       [b,m,k], [b,k,n], [g] -> [b,m,n].
+    // Ragged contracting (k): [b,m,k], [b,k,n], [g] -> [g,b,m,n].
+    if (!rhsGroupDimensions.empty()) {
+      return emitOptionalError(
+          location,
+          "There must be zero group dimensions in the rhs when the "
+          "ragged dimension is batch or contracting.");
+    }
+  } else {
+    // Ragged non-contracting (m): [b,m,k], [g,b,k,n], [g] -> [b,m,n].
+    if (rhsGroupDimensions.size() != 1) {
+      return emitOptionalError(
+          location,
+          "There must be exactly one group dimension in the rhs when the lhs "
+          "ragged dimension is non-contracting.");
+    }
+    // Compare the group dimension size with the number of groups.
+    const int64_t rhsGroupDim = rhsGroupDimensions[0];
+    if (!hlo::verifyCompatibleDims(numGroups,
+                                   rankedRhsType.getDimSize(rhsGroupDim))) {
+      return emitOptionalError(
+          location, "group_sizes is expected to have shape=[",
+          rankedRhsType.getDimSize(rhsGroupDim), "], got [", numGroups, "]");
+    }
+  }
+  return success();
 }
 
-LogicalResult RankSpecializationClusterOp::verify() {
-  Block* body = SingleBlock::getBody();
-  if (body->getArgumentTypes() != getOperandTypes())
-    return emitOpError() << "block argument types must match operand types";
+SmallVector<int64_t> inferRaggedDotOutputDimensions(
+    RankedTensorType rankedLhsType, RankedTensorType rankedRhsType,
+    RankedTensorType rankedGroupSizesType,
+    ArrayRef<int64_t> lhsBatchingDimensions,
+    ArrayRef<int64_t> rhsBatchingDimensions,
+    ArrayRef<int64_t> lhsContractingDimensions,
+    ArrayRef<int64_t> rhsContractingDimensions,
+    ArrayRef<int64_t> lhsRaggedDimensions,
+    ArrayRef<int64_t> rhsGroupDimensions) {
+  // Must have already checked that group_sizes is 1-D.
+  const int64_t numGroups = rankedGroupSizesType.getDimSize(0);
+  // Must have already checked that there is exactly one lhs ragged dim.
+  const int64_t lhsRaggedDim = lhsRaggedDimensions[0];
 
-  // All operands of nested ops must be defined in the body or declared by the
-  // cluster.
-  for (Operation& nested : body->without_terminator()) {
-    if (!llvm::all_of(nested.getOpOperands(), [&](OpOperand& operand) {
-          Operation* def = operand.get().getDefiningOp();
-          if (def != nullptr && def->getBlock() == body) return true;
-          return llvm::is_contained(body->getArguments(), operand.get());
-        }))
-      return emitOpError() << "nested ops must not depend on implicit operands";
+  SmallVector<int64_t> dimensions;
+  // Add the group dimension to the result shape in case of ragged contracting.
+  if (llvm::is_contained(lhsContractingDimensions, lhsRaggedDim)) {
+    dimensions.push_back(numGroups);
+  }
+  auto lhsShape = rankedLhsType.getShape();
+  auto rhsShape = rankedRhsType.getShape();
+  for (const int64_t lhsBatchingDim : lhsBatchingDimensions)
+    dimensions.push_back(lhsShape[lhsBatchingDim]);
+  for (int64_t i = 0; i < rankedLhsType.getRank(); i++)
+    if (!llvm::is_contained(lhsBatchingDimensions, i) &&
+        !llvm::is_contained(lhsContractingDimensions, i))
+      dimensions.push_back(lhsShape[i]);
+  for (int64_t i = 0; i < rankedRhsType.getRank(); i++)
+    if (!llvm::is_contained(rhsBatchingDimensions, i) &&
+        !llvm::is_contained(rhsContractingDimensions, i) &&
+        !llvm::is_contained(rhsGroupDimensions, i))
+      dimensions.push_back(rhsShape[i]);
+  return dimensions;
+}
+
+LogicalResult inferRaggedDotOp(
+    std::optional<Location> location, Value lhs, Value rhs, Value groupSizes,
+    ArrayRef<int64_t> lhsBatchingDimensions,
+    ArrayRef<int64_t> rhsBatchingDimensions,
+    ArrayRef<int64_t> lhsContractingDimensions,
+    ArrayRef<int64_t> rhsContractingDimensions,
+    ArrayRef<int64_t> lhsRaggedDimensions, ArrayRef<int64_t> rhsGroupDimensions,
+    std::optional<ArrayAttr> precisionConfig,
+    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
+  if (failed(hlo::verifyPrecisionConfig(location, precisionConfig))) {
+    return failure();
   }
 
+  // Validate basic properties of dot dimension numbers.
+  if (failed(hlo::checkDotGeneralConstraints(
+          location, lhs.getType(), rhs.getType(), lhsBatchingDimensions,
+          rhsBatchingDimensions, lhsContractingDimensions,
+          rhsContractingDimensions, precisionConfig))) {
+    return failure();
+  }
+
+  // Validate ragged dot constraints.
+  auto rankedLhsType = cast<RankedTensorType>(lhs.getType());
+  auto rankedRhsType = cast<RankedTensorType>(rhs.getType());
+  auto rankedGroupSizesType = cast<RankedTensorType>(groupSizes.getType());
+  if (failed(checkRaggedDotConstraints(
+          location, rankedLhsType, rankedRhsType, rankedGroupSizesType,
+          lhsBatchingDimensions, rhsBatchingDimensions,
+          lhsContractingDimensions, rhsContractingDimensions,
+          lhsRaggedDimensions, rhsGroupDimensions))) {
+    return failure();
+  }
+
+  // Infer the output dimensions of the ragged dot operation.
+  inferredReturnShapes.emplace_back(inferRaggedDotOutputDimensions(
+      rankedLhsType, rankedRhsType, rankedGroupSizesType, lhsBatchingDimensions,
+      rhsBatchingDimensions, lhsContractingDimensions, rhsContractingDimensions,
+      lhsRaggedDimensions, rhsGroupDimensions));
+  return success();
+}
+
+}  // namespace
+
+LogicalResult RaggedDotOp::verify() {
+  auto location = getLoc();
+  auto raggedDotDimNums = getRaggedDotDimensionNumbers();
+
+  SmallVector<ShapedTypeComponents> inferredReturnShapes;
+  if (failed(inferRaggedDotOp(location, getLhs(), getRhs(), getGroupSizes(),
+                              raggedDotDimNums.getLhsBatchingDimensions(),
+                              raggedDotDimNums.getRhsBatchingDimensions(),
+                              raggedDotDimNums.getLhsContractingDimensions(),
+                              raggedDotDimNums.getRhsContractingDimensions(),
+                              raggedDotDimNums.getLhsRaggedDimensions(),
+                              raggedDotDimNums.getRhsGroupDimensions(),
+                              getPrecisionConfig(), inferredReturnShapes)))
+    return failure();
+  auto inferredShape = inferredReturnShapes[0];
+
+  auto resultType = cast<ShapedType>(getResult().getType());
+  if (failed(verifyCompatibleShape(inferredShape.getDims(),
+                                   resultType.getShape()))) {
+    return emitOptionalError(
+        location, "inferred shape '",
+        hlo::dimSizesToString(inferredShape.getDims()), "' ",
+        "is incompatible with return type of operation ", resultType, "");
+  }
+
+  return success();
+}
+
+LogicalResult RaggedDotOp::inferReturnTypes(
+    MLIRContext*, std::optional<Location>, ValueRange operands,
+    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+    SmallVectorImpl<Type>& inferredReturnTypes) {
+  RaggedDotOp::Adaptor op(operands, attributes, properties, regions);
+
+  auto rankedLhsType = cast<RankedTensorType>(op.getLhs().getType());
+  auto rankedRhsType = cast<RankedTensorType>(op.getRhs().getType());
+  auto rankedGroupSizesType =
+      cast<RankedTensorType>(op.getGroupSizes().getType());
+  auto raggedDotDimNums = op.getRaggedDotDimensionNumbers();
+
+  inferredReturnTypes.push_back(RankedTensorType::get(
+      inferRaggedDotOutputDimensions(
+          rankedLhsType, rankedRhsType, rankedGroupSizesType,
+          raggedDotDimNums.getLhsBatchingDimensions(),
+          raggedDotDimNums.getRhsBatchingDimensions(),
+          raggedDotDimNums.getLhsContractingDimensions(),
+          raggedDotDimNums.getRhsContractingDimensions(),
+          raggedDotDimNums.getLhsRaggedDimensions(),
+          raggedDotDimNums.getRhsGroupDimensions()),
+      rankedLhsType.getElementType()));
   return success();
 }
 
@@ -449,32 +658,12 @@ LogicalResult RankSpecializationClusterOp::verify() {
 
 LogicalResult TopKOp::inferReturnTypeComponents(
     MLIRContext* context, std::optional<Location> location,
-    ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
+    ValueShapeRange operands, DictionaryAttr attributes,
+    OpaqueProperties properties, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
-  Builder builder(context);
-  TopKOp::Adaptor adaptor(operands, attributes, regions);
-  Value operand = adaptor.getOperand();
-  uint64_t k = adaptor.getK();
-
-  auto operandTy = operand.getType().dyn_cast<RankedTensorType>();
-  if (!operandTy) return emitOptionalError(location, "operand must be ranked");
-  if (operandTy.getRank() < 1)
-    return emitOptionalError(location, "operand's rank must be at least 1");
-  auto operandLastDim = operandTy.getShape()[operandTy.getRank() - 1];
-  if (operandLastDim == ShapedType::kDynamic)
-    return emitOptionalError(location,
-                             "operand's last dimension must be static");
-  if (operandLastDim < static_cast<int64_t>(k))
-    return emitOptionalError(location,
-                             "operand's last dimension must be at least ", k);
-
-  SmallVector<int64_t> resultShape;
-  append_range(resultShape, operandTy.getShape());
-  resultShape[operandTy.getRank() - 1] = k;
-
-  inferredReturnShapes.emplace_back(resultShape, operandTy.getElementType());
-  inferredReturnShapes.emplace_back(resultShape, builder.getI32Type());
-  return success();
+  TopKOp::Adaptor adaptor(operands, attributes, properties, regions);
+  return hlo::inferTopKOp(location, adaptor.getOperand(), adaptor.getK(),
+                          inferredReturnShapes);
 }
 
 //===----------------------------------------------------------------------===//
@@ -484,10 +673,11 @@ LogicalResult TopKOp::inferReturnTypeComponents(
 OpFoldResult ConstantOp::fold(FoldAdaptor /*adaptor*/) { return getValue(); }
 
 LogicalResult ConstantOp::inferReturnTypes(
-    MLIRContext*, std::optional<Location>, ValueRange,
-    DictionaryAttr attributes, RegionRange,
+    MLIRContext*, std::optional<Location>, ValueRange operands,
+    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
     SmallVectorImpl<Type>& inferredReturnTypes) {
-  Type type = attributes.get("value").cast<TypedAttr>().getType();
+  Adaptor adaptor(operands, attributes, properties, regions);
+  Type type = cast<TypedAttr>(adaptor.getValueAttr()).getType();
   inferredReturnTypes.push_back(type);
   return success();
 }
@@ -544,9 +734,9 @@ ChloDialect::ChloDialect(MLIRContext* context)
 
 Operation* ChloDialect::materializeConstant(OpBuilder& builder, Attribute value,
                                             Type type, Location loc) {
-  if (value.isa<ElementsAttr>())
+  if (isa<ElementsAttr>(value))
     return builder.create<chlo::ConstantOp>(loc, type,
-                                            value.cast<ElementsAttr>());
+                                            cast<ElementsAttr>(value));
   return nullptr;
 }
 
@@ -568,6 +758,141 @@ void ChloDialect::printAttribute(Attribute attr, DialectAsmPrinter& os) const {
   LogicalResult result = generatedAttributePrinter(attr, os);
   (void)result;
   assert(succeeded(result));
+}
+
+/// Helpers for attributes parsing.
+
+static ParseResult parseDims(AsmParser& parser,
+                             SmallVector<int64_t>& dimSizes) {
+  dimSizes.clear();
+  auto failOrDims = hlo::parseDimSizes(parser);
+  if (failed(failOrDims)) return failure();
+  dimSizes = std::move(*failOrDims);
+  return success();
+}
+
+/// Parse a custom attribute that resembles a struct of the form
+/// <
+///   foo = something_parsed_by_custom_parser,
+///   bar = something_parsed_by_different_custom_parser,
+///   baz something_parsed_by_another_custom_parser
+/// >
+/// The optional argument `parse_equal` array can be used to denote if
+/// '=' follows the keyword (see baz in the example above) for a field. If
+/// not provided, all fields must be followed by a '='.
+static ParseResult parseStruct(
+    AsmParser& parser, ArrayRef<StringRef> keywords,
+    ArrayRef<llvm::function_ref<ParseResult()>> parseFuncs,
+    ArrayRef<bool> parseEqual = {}) {
+  assert(keywords.size() == parseFuncs.size());
+  assert(parseEqual.empty() || parseEqual.size() == keywords.size());
+  SmallVector<bool> seen(keywords.size(), false);
+  while (failed(parser.parseOptionalGreater())) {
+    bool foundOne = false;
+    for (const auto& it : llvm::enumerate(keywords)) {
+      size_t index = it.index();
+      StringRef keyword = it.value();
+      if (failed(parser.parseOptionalKeyword(keyword))) continue;
+      if (seen[index])
+        return parser.emitError(parser.getCurrentLocation())
+               << "duplicated `" << keyword << "` entry";
+      if (parseEqual.empty() || parseEqual[index]) {
+        if (failed(parser.parseEqual())) return failure();
+      }
+      if (failed(parseFuncs[index]())) return failure();
+      if (failed(parser.parseOptionalComma())) return parser.parseGreater();
+      seen[index] = true;
+      foundOne = true;
+    }
+    if (!foundOne) {
+      auto parseError = parser.emitError(parser.getCurrentLocation())
+                        << "expected one of: ";
+      llvm::interleaveComma(keywords, parseError, [&](StringRef kw) {
+        parseError << '`' << kw << '`';
+      });
+      return parseError;
+    }
+  }
+  return success();
+}
+
+// Helpers to print an optional array or integer field, to simplify writing
+// attribute printers.
+template <typename T>
+static void printField(AsmPrinter& printer, StringRef name, T field,
+                       StringRef& separator) {
+  if (field != 0) {
+    printer << separator << name << " = " << field;
+    separator = ", ";
+  }
+}
+template <typename T>
+static void printField(AsmPrinter& printer, StringRef name, ArrayRef<T> field,
+                       StringRef& separator) {
+  if (!field.empty()) {
+    printer << separator << name << " = [";
+    llvm::interleaveComma(field, printer);
+    printer << "]";
+    separator = ", ";
+  }
+}
+template <typename... Ts>
+static void printStruct(AsmPrinter& printer, StringRef name,
+                        Ts... printFields) {
+  printer << "<";
+  StringRef separator = "";
+  // Fold expression to print each entry in the parameter pack.
+  // TODO(stablehlo-team): this can be simplified when TF moves to C++17.
+  using unused = int[];
+  (void)unused{0, (printField(printer, std::get<0>(printFields),
+                              std::get<1>(printFields), separator),
+                   0)...};
+  printer << ">";
+}
+
+// Custom printer and parser for RaggedDotDimensionNumbersAttr.
+void RaggedDotDimensionNumbersAttr::print(AsmPrinter& printer) const {
+  printStruct(
+      printer, "ragged_dot",
+      std::make_pair("lhs_batching_dimensions", getLhsBatchingDimensions()),
+      std::make_pair("rhs_batching_dimensions", getRhsBatchingDimensions()),
+      std::make_pair("lhs_contracting_dimensions",
+                     getLhsContractingDimensions()),
+      std::make_pair("rhs_contracting_dimensions",
+                     getRhsContractingDimensions()),
+      std::make_pair("lhs_ragged_dimensions", getLhsRaggedDimensions()),
+      std::make_pair("rhs_group_dimensions", getRhsGroupDimensions()));
+}
+
+Attribute RaggedDotDimensionNumbersAttr::parse(AsmParser& parser, Type type) {
+  if (failed(parser.parseLess())) return {};
+
+  SmallVector<int64_t> lhsBatchingDimensions;
+  SmallVector<int64_t> rhsBatchingDimensions;
+  SmallVector<int64_t> lhsContractingDimensions;
+  SmallVector<int64_t> rhsContractingDimensions;
+  SmallVector<int64_t> lhsRaggedDimensions;
+  SmallVector<int64_t> rhsGroupDimensions;
+
+  if (failed(parseStruct(
+          parser,
+          {"lhs_batching_dimensions", "rhs_batching_dimensions",
+           "lhs_contracting_dimensions", "rhs_contracting_dimensions",
+           "lhs_ragged_dimensions", "rhs_group_dimensions"},
+          {[&]() { return parseDims(parser, lhsBatchingDimensions); },
+           [&]() { return parseDims(parser, rhsBatchingDimensions); },
+           [&]() { return parseDims(parser, lhsContractingDimensions); },
+           [&]() { return parseDims(parser, rhsContractingDimensions); },
+           [&]() { return parseDims(parser, lhsRaggedDimensions); },
+           [&]() { return parseDims(parser, rhsGroupDimensions); }}))) {
+    parser.emitError(parser.getCurrentLocation())
+        << "failed parsing ragged dot dimension numbers attribute";
+    return {};
+  }
+  return RaggedDotDimensionNumbersAttr::get(
+      parser.getContext(), lhsBatchingDimensions, rhsBatchingDimensions,
+      lhsContractingDimensions, rhsContractingDimensions, lhsRaggedDimensions,
+      rhsGroupDimensions);
 }
 
 }  // namespace chlo

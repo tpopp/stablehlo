@@ -15,11 +15,21 @@ limitations under the License.
 
 #include "stablehlo/dialect/VhloTypes.h"
 
+#include <cstdint>
+
+#include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
-#include "mlir/Dialect/Quant/QuantTypes.h"
+#include "mlir/Dialect/Quant/IR/QuantTypes.h"
 #include "mlir/Dialect/Shape/IR/Shape.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/TypeSupport.h"
+#include "mlir/IR/Types.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "stablehlo/dialect/AssemblyFormat.h"
 
 namespace mlir {
@@ -37,21 +47,24 @@ Type convertBuiltinIntegerType(IntegerType type) {
   bool isSignless = type.isSignless();
   auto ctx = type.getContext();
   switch (type.getWidth()) {
+    case 2:
+      return isSignless ? cast<Type>(IntegerSI2V1Type::get(ctx))
+                        : cast<Type>(IntegerUI2V1Type::get(ctx));
     case 4:
-      return isSignless ? IntegerSI4V1Type::get(ctx).cast<Type>()
-                        : IntegerUI4V1Type::get(ctx).cast<Type>();
+      return isSignless ? cast<Type>(IntegerSI4V1Type::get(ctx))
+                        : cast<Type>(IntegerUI4V1Type::get(ctx));
     case 8:
-      return isSignless ? IntegerSI8V1Type::get(ctx).cast<Type>()
-                        : IntegerUI8V1Type::get(ctx).cast<Type>();
+      return isSignless ? cast<Type>(IntegerSI8V1Type::get(ctx))
+                        : cast<Type>(IntegerUI8V1Type::get(ctx));
     case 16:
-      return isSignless ? IntegerSI16V1Type::get(ctx).cast<Type>()
-                        : IntegerUI16V1Type::get(ctx).cast<Type>();
+      return isSignless ? cast<Type>(IntegerSI16V1Type::get(ctx))
+                        : cast<Type>(IntegerUI16V1Type::get(ctx));
     case 32:
-      return isSignless ? IntegerSI32V1Type::get(ctx).cast<Type>()
-                        : IntegerUI32V1Type::get(ctx).cast<Type>();
+      return isSignless ? cast<Type>(IntegerSI32V1Type::get(ctx))
+                        : cast<Type>(IntegerUI32V1Type::get(ctx));
     case 64:
-      return isSignless ? IntegerSI64V1Type::get(ctx).cast<Type>()
-                        : IntegerUI64V1Type::get(ctx).cast<Type>();
+      return isSignless ? cast<Type>(IntegerSI64V1Type::get(ctx))
+                        : cast<Type>(IntegerUI64V1Type::get(ctx));
   }
   return {};
 }
@@ -71,11 +84,41 @@ void VhloTypeConverter::addBuiltinToVhloConversions() {
       [&](Float32Type type) { return FloatF32V1Type::get(type.getContext()); });
   addConversion(
       [&](Float64Type type) { return FloatF64V1Type::get(type.getContext()); });
+  addConversion([&](Float4E2M1FNType type) {
+    return FloatF4E2M1FNV1Type::get(type.getContext());
+  });
+  addConversion([&](Float6E2M3FNType type) {
+    return FloatF6E2M3FNV1Type::get(type.getContext());
+  });
+  addConversion([&](Float6E3M2FNType type) {
+    return FloatF6E3M2FNV1Type::get(type.getContext());
+  });
+  addConversion([&](Float8E3M4Type type) {
+    return FloatF8E3M4V1Type::get(type.getContext());
+  });
+  addConversion([&](Float8E4M3Type type) {
+    return FloatF8E4M3V1Type::get(type.getContext());
+  });
   addConversion([&](Float8E4M3FNType type) {
     return FloatF8E4M3FNV1Type::get(type.getContext());
   });
   addConversion([&](Float8E5M2Type type) {
     return FloatF8E5M2V1Type::get(type.getContext());
+  });
+  addConversion([&](Float8E4M3FNUZType type) {
+    return FloatF8E4M3FNUZV1Type::get(type.getContext());
+  });
+  addConversion([&](Float8E4M3B11FNUZType type) {
+    return FloatF8E4M3B11FNUZV1Type::get(type.getContext());
+  });
+  addConversion([&](Float8E5M2FNUZType type) {
+    return FloatF8E5M2FNUZV1Type::get(type.getContext());
+  });
+  addConversion([&](Float8E8M0FNUType type) {
+    return FloatF8E8M0FNUV1Type::get(type.getContext());
+  });
+  addConversion([&](FloatTF32Type type) {
+    return FloatTF32V1Type::get(type.getContext());
   });
   addConversion([&](FunctionType type) -> Type {
     SmallVector<Type> convertedInputs;
@@ -89,6 +132,8 @@ void VhloTypeConverter::addBuiltinToVhloConversions() {
       [&](IndexType type) { return IndexV1Type::get(type.getContext()); });
   addConversion(
       [&](IntegerType type) { return convertBuiltinIntegerType(type); });
+  addConversion(
+      [&](NoneType type) { return NoneV1Type::get(type.getContext()); });
   addConversion([&](RankedTensorType type) -> Type {
     auto encoding = type.getEncoding();
     auto convertedEncoding = encoding ? convertEncoding(encoding) : encoding;
@@ -110,6 +155,18 @@ void VhloTypeConverter::addBuiltinToVhloConversions() {
         type.getContext(), type.getFlags(), convertedStorageType,
         convertedExpressedType, APFloat(type.getScale()), type.getZeroPoint(),
         type.getStorageTypeMin(), type.getStorageTypeMax());
+  });
+  addConversion([&](quant::UniformQuantizedPerAxisType type) -> Type {
+    Type convertedStorageType = convertType(type.getStorageType());
+    Type convertedExpressedType = convertType(type.getExpressedType());
+    if (!convertedStorageType || !convertedExpressedType) return {};
+    auto scales = llvm::map_to_vector(
+        type.getScales(), [](double scale) { return APFloat(scale); });
+    return vhlo::UniformQuantizedPerAxisV1Type::get(
+        type.getContext(), type.getFlags(), convertedStorageType,
+        convertedExpressedType, type.getQuantizedDimension(), scales,
+        type.getZeroPoints(), type.getStorageTypeMin(),
+        type.getStorageTypeMax());
   });
   addConversion([&](UnrankedTensorType type) -> Type {
     auto convertedElementType = convertType(type.getElementType());
@@ -137,11 +194,41 @@ void VhloTypeConverter::addVhloToBuiltinConversions() {
       [&](FloatF32V1Type type) { return Float32Type::get(type.getContext()); });
   addConversion(
       [&](FloatF64V1Type type) { return Float64Type::get(type.getContext()); });
+  addConversion([&](FloatF4E2M1FNV1Type type) {
+    return Float4E2M1FNType::get(type.getContext());
+  });
+  addConversion([&](FloatF6E2M3FNV1Type type) {
+    return Float6E2M3FNType::get(type.getContext());
+  });
+  addConversion([&](FloatF6E3M2FNV1Type type) {
+    return Float6E3M2FNType::get(type.getContext());
+  });
+  addConversion([&](FloatF8E3M4V1Type type) {
+    return Float8E3M4Type::get(type.getContext());
+  });
+  addConversion([&](FloatF8E4M3V1Type type) {
+    return Float8E4M3Type::get(type.getContext());
+  });
   addConversion([&](FloatF8E4M3FNV1Type type) {
     return Float8E4M3FNType::get(type.getContext());
   });
   addConversion([&](FloatF8E5M2V1Type type) {
     return Float8E5M2Type::get(type.getContext());
+  });
+  addConversion([&](FloatF8E4M3FNUZV1Type type) {
+    return Float8E4M3FNUZType::get(type.getContext());
+  });
+  addConversion([&](FloatF8E4M3B11FNUZV1Type type) {
+    return Float8E4M3B11FNUZType::get(type.getContext());
+  });
+  addConversion([&](FloatF8E5M2FNUZV1Type type) {
+    return Float8E5M2FNUZType::get(type.getContext());
+  });
+  addConversion([&](FloatF8E8M0FNUV1Type type) {
+    return Float8E8M0FNUType::get(type.getContext());
+  });
+  addConversion([&](FloatTF32V1Type type) {
+    return FloatTF32Type::get(type.getContext());
   });
   addConversion([&](FunctionV1Type type) -> Type {
     SmallVector<Type> convertedInputs;
@@ -153,6 +240,9 @@ void VhloTypeConverter::addVhloToBuiltinConversions() {
   });
   addConversion(
       [&](IndexV1Type type) { return IndexType::get(type.getContext()); });
+  addConversion([&](IntegerSI2V1Type type) {
+    return IntegerType::get(type.getContext(), 2);
+  });
   addConversion([&](IntegerSI4V1Type type) {
     return IntegerType::get(type.getContext(), 4);
   });
@@ -167,6 +257,9 @@ void VhloTypeConverter::addVhloToBuiltinConversions() {
   });
   addConversion([&](IntegerSI64V1Type type) {
     return IntegerType::get(type.getContext(), 64);
+  });
+  addConversion([&](IntegerUI2V1Type type) {
+    return IntegerType::get(type.getContext(), 2, IntegerType::Unsigned);
   });
   addConversion([&](IntegerUI4V1Type type) {
     return IntegerType::get(type.getContext(), 4, IntegerType::Unsigned);
@@ -183,6 +276,8 @@ void VhloTypeConverter::addVhloToBuiltinConversions() {
   addConversion([&](IntegerUI64V1Type type) {
     return IntegerType::get(type.getContext(), 64, IntegerType::Unsigned);
   });
+  addConversion(
+      [&](NoneV1Type type) { return NoneType::get(type.getContext()); });
   addConversion([&](RankedTensorV1Type type) -> Type {
     auto encoding = type.getEncoding();
     auto convertedEncoding = encoding ? convertEncoding(encoding) : encoding;
@@ -203,6 +298,18 @@ void VhloTypeConverter::addVhloToBuiltinConversions() {
     return quant::UniformQuantizedType::get(
         type.getFlags(), convertedStorageType, convertedExpressedType,
         type.getScale().convertToDouble(), type.getZeroPoint(),
+        type.getStorageTypeMin(), type.getStorageTypeMax());
+  });
+  addConversion([&](UniformQuantizedPerAxisV1Type type) -> Type {
+    Type convertedStorageType = convertType(type.getStorageType());
+    Type convertedExpressedType = convertType(type.getExpressedType());
+    if (!convertedStorageType || !convertedExpressedType) return {};
+    auto scales = llvm::map_to_vector(
+        type.getScales(),
+        [](const APFloat& scale) { return scale.convertToDouble(); });
+    return quant::UniformQuantizedPerAxisType::get(
+        type.getFlags(), convertedStorageType, convertedExpressedType, scales,
+        type.getZeroPoints(), type.getQuantizedDimension(),
         type.getStorageTypeMin(), type.getStorageTypeMax());
   });
   addConversion([&](UnrankedTensorV1Type type) -> Type {

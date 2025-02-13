@@ -44,8 +44,30 @@ def StableHLO_PrecisionAttr : EnumAttr<StableHLO_Dialect, StableHLO_Precision, "
 
 // TODO(b/129153247) See if it's possible to also validate the size.
 def StableHLO_PrecisionConfigAttr:
-    OptionalAttr<
-          TypedArrayAttrBase<StableHLO_PrecisionAttr, "Precision Config attribute">>;
+  TypedArrayAttrBase<StableHLO_PrecisionAttr, "Precision Config attribute">;
+
+//===----------------------------------------------------------------------===//
+// Result Accuracy enum definitions.
+//===----------------------------------------------------------------------===//
+
+def STABLEHLO_RESULT_ACCURACY_DEFAULT : I32EnumAttrCase<"DEFAULT", 0>;
+def STABLEHLO_RESULT_ACCURACY_HIGHEST : I32EnumAttrCase<"HIGHEST", 1>;
+def STABLEHLO_RESULT_ACCURACY_TOLERANCE: I32EnumAttrCase<"TOLERANCE", 2>;
+
+def StableHLO_ResultAccuracyMode : I32EnumAttr<"ResultAccuracyMode",
+    "XLA result accuracy mode.",
+    [
+      STABLEHLO_RESULT_ACCURACY_DEFAULT,
+      STABLEHLO_RESULT_ACCURACY_HIGHEST,
+      STABLEHLO_RESULT_ACCURACY_TOLERANCE
+    ]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::stablehlo";
+}
+
+def StableHLO_ResultAccuracyModeAttr : EnumAttr<StableHLO_Dialect, StableHLO_ResultAccuracyMode, "result_accuracy_mode"> {
+  let assemblyFormat = "`<` $value `>`";
+}
 
 //===----------------------------------------------------------------------===//
 // Fast Fourier Transform Type enum definitions.
@@ -85,12 +107,15 @@ def STABLEHLO_CUSTOM_CALL_API_VERSION_STATUS_RETURNING :
     I32EnumAttrCase<"API_VERSION_STATUS_RETURNING", 2>;
 def STABLEHLO_CUSTOM_CALL_API_VERSION_STATUS_RETURNING_UNIFIED :
     I32EnumAttrCase<"API_VERSION_STATUS_RETURNING_UNIFIED", 3>;
+def STABLEHLO_CUSTOM_CALL_API_VERSION_TYPED_FFI :
+    I32EnumAttrCase<"API_VERSION_TYPED_FFI", 4>;
 def StableHLO_CustomCallApiVersionAttr :
     I32EnumAttr<"CustomCallApiVersion", "Custom call API version", [
         STABLEHLO_CUSTOM_CALL_API_VERSION_UNSPECIFIED,
         STABLEHLO_CUSTOM_CALL_API_VERSION_ORIGINAL,
         STABLEHLO_CUSTOM_CALL_API_VERSION_STATUS_RETURNING,
-        STABLEHLO_CUSTOM_CALL_API_VERSION_STATUS_RETURNING_UNIFIED
+        STABLEHLO_CUSTOM_CALL_API_VERSION_STATUS_RETURNING_UNIFIED,
+        STABLEHLO_CUSTOM_CALL_API_VERSION_TYPED_FFI
     ]> {
   let cppNamespace = "::mlir::stablehlo";
 }

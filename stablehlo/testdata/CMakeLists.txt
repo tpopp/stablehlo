@@ -13,23 +13,17 @@
 # limitations under the License.
 
 configure_lit_site_cfg(
-        ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
-        ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py
-        MAIN_CONFIG
-        ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py
+  ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
+  ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py
+  MAIN_CONFIG
+  ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py
 )
-
-set(STABLEHLO_TEST_DEPENDS
-        FileCheck count not
-        stablehlo-opt
-        stablehlo-interpreter
+add_lit_testsuite(check-stablehlo-testdata "Running the testdata/ suite"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  DEPENDS
+  FileCheck
+  stablehlo-opt
+  stablehlo-translate
 )
-add_lit_testsuite(check-stablehlo-compatibility-lit "Running the StableHLO compatibility tests"
-        ${CMAKE_CURRENT_BINARY_DIR}
-        DEPENDS ${STABLEHLO_TEST_DEPENDS}
-        )
-set_target_properties(check-stablehlo-compatibility-lit PROPERTIES FOLDER "Tests")
-add_lit_testsuites(STABLEHLO_SUITE ${CMAKE_CURRENT_SOURCE_DIR} DEPENDS ${STABLEHLO_TEST_DEPENDS})
-
-add_dependencies(check-stablehlo check-stablehlo-compatibility-lit)
+add_dependencies(check-stablehlo-slow check-stablehlo-testdata)
 

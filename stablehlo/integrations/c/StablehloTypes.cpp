@@ -13,6 +13,8 @@ limitations under the License.
 
 #include "stablehlo/integrations/c/StablehloTypes.h"
 
+#include "llvm/Support/Casting.h"
+#include "mlir-c/IR.h"
 #include "mlir/CAPI/IR.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
@@ -21,5 +23,5 @@ MlirType stablehloTokenTypeGet(MlirContext ctx) {
 }
 
 bool stablehloTypeIsAToken(MlirType type) {
-  return unwrap(type).isa<mlir::stablehlo::TokenType>();
+  return llvm::isa<mlir::stablehlo::TokenType>(unwrap(type));
 }

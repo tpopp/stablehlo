@@ -1,5 +1,5 @@
 /* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
-   Copyright 2022 The StableHLO Authors.
+   Copyright 2023 The StableHLO Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,9 +16,16 @@ limitations under the License.
 
 #include "stablehlo/dialect/Version.h"
 
+#include <array>
+#include <cstdint>
+
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/Support/LLVM.h"
 
 namespace mlir {
 namespace vhlo {
@@ -46,11 +53,6 @@ static FailureOr<std::array<int64_t, 3>> extractVersionNumbers(
                                 parseNumber(matches[3])};
 }
 
-template <typename OutputT>
-OutputT& dump(OutputT& out, const Version& version) {
-  return out << version.getMajor() << '.' << version.getMinor() << '.'
-             << version.getPatch();
-}
 }  // namespace
 
 FailureOr<Version> Version::fromString(llvm::StringRef versionRef) {
@@ -60,11 +62,41 @@ FailureOr<Version> Version::fromString(llvm::StringRef versionRef) {
   return Version(versionArr[0], versionArr[1], versionArr[2]);
 }
 
-mlir::Diagnostic& operator<<(mlir::Diagnostic& diag, const Version& version) {
-  return dump<mlir::Diagnostic>(diag, version);
+FailureOr<int64_t> Version::getBytecodeVersion() const {
+  if (*this < Version(0, 9, 0)) return failure();
+  if (*this < Version(0, 10, 0)) return 0;
+  if (*this < Version(0, 12, 0)) return 1;
+  if (*this < Version(0, 14, 0)) return 3;
+  if (*this < Version(0, 15, 0)) return 4;  // (revised from 5 to 4 in #1827)
+  if (*this <= getCurrentVersion()) return 6;
+  return failure();
 }
-llvm::raw_ostream& operator<<(llvm::raw_ostream& diag, const Version& version) {
-  return dump<llvm::raw_ostream>(diag, version);
+
+Version Version::fromCompatibilityRequirement(
+    CompatibilityRequirement requirement) {
+  // Compatibility requirement versions can be updated as needed, as long as the
+  // version satisfies the requirement.
+  // The time frames used are from the date that the release was tagged on, not
+  // merged. The tag date is when the version has been verified and exported to
+  // XLA. See: https://github.com/openxla/stablehlo/tags
+  switch (requirement) {
+    case CompatibilityRequirement::NONE:
+      return Version::getCurrentVersion();
+    case CompatibilityRequirement::WEEK_4:
+      return Version(1, 8, 8);  // WEEK_4 ANCHOR: DO NOT MODIFY
+    case CompatibilityRequirement::WEEK_12:
+      return Version(1, 8, 3);  // WEEK_12 ANCHOR: DO NOT MODIFY
+    case CompatibilityRequirement::MAX:
+      return Version::getMinimumVersion();
+  }
+  llvm::report_fatal_error("Unhandled compatibility requirement");
+}
+
+mlir::Diagnostic& operator<<(mlir::Diagnostic& diag, const Version& version) {
+  return diag << version.toString();
+}
+llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const Version& version) {
+  return os << version.toString();
 }
 
 }  // namespace vhlo
